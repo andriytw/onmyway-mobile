@@ -4,13 +4,28 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAuth } from '../../contexts/AuthContext';
 import { TransportMode } from '../../types';
+import { UserRole } from '../../types/auth.types';
 import MapView from '../../components/PassengerSender/MapView';
 
 const PassengerSenderApp: React.FC = () => {
-  const { switchRole } = useAuth();
+  const { switchRole, isLoading: authLoading } = useAuth();
+
+  const handleSwitchToDriver = async () => {
+    try {
+      await switchRole(UserRole.DRIVER);
+    } catch (error) {
+      Alert.alert(
+        'Помилка',
+        'Не вдалося переключитися на роль водія. Спробуйте ще раз.',
+        [{ text: 'OK' }]
+      );
+      console.error('Switch role error:', error);
+    }
+  };
 
   // ALL state variables from workflow contract (PassengerSenderApp.tsx lines 38-64)
   const [activeMode, setActiveMode] = useState<TransportMode>(TransportMode.CITY);
@@ -65,6 +80,17 @@ const PassengerSenderApp: React.FC = () => {
           <Text style={styles.stateText}>driverProgress: {driverProgress.toFixed(2)}</Text>
         </View>
       </View>
+
+      {/* Button to switch to Driver mode */}
+      <TouchableOpacity
+        style={styles.switchRoleButton}
+        onPress={handleSwitchToDriver}
+        disabled={authLoading}
+        activeOpacity={0.7}
+      >
+        <Icon name="car" size={20} color="#16a34a" />
+        <Text style={styles.switchRoleButtonText}>Перейти на сторону водія</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -100,6 +126,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748b',
     fontFamily: 'monospace',
+  },
+  switchRoleButton: {
+    position: 'absolute',
+    bottom: 40,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#ffffff',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#16a34a',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  switchRoleButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#16a34a',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
 });
 

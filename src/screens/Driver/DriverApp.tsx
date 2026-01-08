@@ -4,12 +4,16 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { DriverProvider } from '../../contexts/DriverContext';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useDriver } from '../../contexts/DriverContext';
 import DriverMapView from '../../components/Driver/DriverMapView';
+import DriverBottomSheet from '../../components/Driver/DriverBottomSheet';
+import DateFilter from '../../components/Driver/DateFilter';
+import { useNavigation } from '@react-navigation/native';
 
 const DriverAppContent: React.FC = () => {
+  const navigation = useNavigation();
   // Access all DriverContext state (from workflow contract)
   const {
     isOnline,
@@ -32,28 +36,28 @@ const DriverAppContent: React.FC = () => {
       {/* Full-screen map container - ready for Mapbox */}
       <DriverMapView />
 
-      {/* Placeholder info overlay - positioned absolutely */}
-      <View style={styles.overlay}>
-        <View style={styles.infoCard}>
-          <Text style={styles.title}>Driver App</Text>
-          <Text style={styles.subtitle}>Placeholder - DriverProvider active</Text>
-          <Text style={styles.stateText}>isOnline: {isOnline.toString()}</Text>
-          <Text style={styles.stateText}>currentRoute.length: {currentRoute.length}</Text>
-          <Text style={styles.stateText}>activeRequests.length: {activeRequests.length}</Text>
-          <Text style={styles.stateText}>isInRoute: {isInRoute.toString()}</Text>
-          <Text style={styles.stateText}>availablePassengers: {availablePassengers.length}</Text>
-        </View>
-      </View>
+      {/* Date Filter */}
+      <DateFilter />
+
+      {/* Menu button to open drawer */}
+      <TouchableOpacity
+        style={styles.menuButton}
+        onPress={() => (navigation as any).openDrawer()}
+        activeOpacity={0.7}
+      >
+        <Icon name="menu" size={20} color="#0f172a" />
+      </TouchableOpacity>
+
+      {/* Bottom Sheet */}
+      <DriverBottomSheet />
     </View>
   );
 };
 
+// DriverApp no longer needs DriverProvider wrapper
+// It's now provided by DriverDrawerNavigator
 const DriverApp: React.FC = () => {
-  return (
-    <DriverProvider>
-      <DriverAppContent />
-    </DriverProvider>
-  );
+  return <DriverAppContent />;
 };
 
 export default DriverApp;
@@ -62,33 +66,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  overlay: {
+  menuButton: {
     position: 'absolute',
-    top: 60,
+    top: 50,
     left: 16,
-    right: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 16,
-    maxHeight: 300,
-  },
-  infoCard: {
-    gap: 8,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#0f172a',
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#64748b',
-    marginBottom: 8,
-  },
-  stateText: {
-    fontSize: 11,
-    color: '#64748b',
-    fontFamily: 'monospace',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 100,
   },
 });
 

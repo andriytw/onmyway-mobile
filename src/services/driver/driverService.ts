@@ -9,6 +9,7 @@ import { SERVICES_CONFIG } from '../../config/services.config';
 import { ActiveRequest, DriverProfile, RouteStop, DriverEarnings, ScheduledRide, BlacklistItem } from '../../types/driver.types';
 import { getMockActiveRequests, MOCK_DRIVER_PROFILE, getMockScheduledRides, MOCK_BLACKLIST } from '../mock/mockData';
 import { mockData } from '../mock/mockApi';
+import { setDriverOnlineStatus } from './driverStatusService';
 
 export interface DriverService {
   getProfile(): Promise<DriverProfile>;
@@ -44,6 +45,10 @@ class MockDriverService implements DriverService {
   async setOnlineStatus(isOnline: boolean): Promise<void> {
     await mockData.delay();
     this.profile.isOnline = isOnline;
+    // If Supabase is enabled, also persist to database
+    if (SERVICES_CONFIG.USE_SUPABASE) {
+      await setDriverOnlineStatus(isOnline);
+    }
   }
 
   async getActiveRequests(date: string): Promise<ActiveRequest[]> {
@@ -114,7 +119,12 @@ class ApiDriverService implements DriverService {
   }
 
   async setOnlineStatus(isOnline: boolean): Promise<void> {
-    await apiClient.post(API_ENDPOINTS.DRIVER.STATUS, { isOnline });
+    // If Supabase is enabled, use Supabase instead of API
+    if (SERVICES_CONFIG.USE_SUPABASE) {
+      await setDriverOnlineStatus(isOnline);
+    } else {
+      await apiClient.post(API_ENDPOINTS.DRIVER.STATUS, { isOnline });
+    }
   }
 
   async getActiveRequests(date: string): Promise<ActiveRequest[]> {

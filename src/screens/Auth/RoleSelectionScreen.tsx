@@ -3,7 +3,7 @@
  * Exact workflow: displays two roles → calls switchRole() on selection
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,8 @@ import { UserRole } from '../../types/auth.types';
 import { useAuth } from '../../contexts/AuthContext';
 
 const RoleSelectionScreen: React.FC = () => {
-  const { switchRole, role: currentRole, isLoading } = useAuth();
+  const { switchRole, role: currentRole, isLoading, user } = useAuth();
+  const [error, setError] = useState<string | null>(null);
 
   const roles = [
     {
@@ -35,12 +36,20 @@ const RoleSelectionScreen: React.FC = () => {
   ];
 
   const handleSelectRole = async (selectedRole: UserRole) => {
+    if (!user) {
+      setError('Користувач не авторизований. Будь ласка, увійдіть знову.');
+      return;
+    }
+
+    setError(null);
     try {
       await switchRole(selectedRole);
       // Navigation will automatically handle transition
       // because AuthContext state change triggers AppNavigator re-render
     } catch (error) {
       console.error('Role selection error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Помилка вибору ролі';
+      setError(errorMessage);
     }
   };
 
@@ -88,6 +97,12 @@ const RoleSelectionScreen: React.FC = () => {
             );
           })}
         </View>
+
+        {error && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
 
         {isLoading && (
           <View style={styles.loadingContainer}>
@@ -187,6 +202,20 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     color: '#94a3b8',
+    textAlign: 'center',
+  },
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 2,
+    borderColor: '#fecaca',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 14,
+    fontWeight: '700',
     textAlign: 'center',
   },
 });

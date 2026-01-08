@@ -14,30 +14,64 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 
-const LoginScreen: React.FC = () => {
+interface LoginScreenProps {
+  onSwitchToRegister?: () => void;
+}
+
+const LoginScreen: React.FC<LoginScreenProps> = ({ onSwitchToRegister }) => {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDeletedUser, setIsDeletedUser] = useState(false);
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
       setError('Будь ласка, заповніть всі поля');
+      setIsDeletedUser(false);
       return;
     }
 
     setError(null);
+    setIsDeletedUser(false);
     setIsLoading(true);
 
     try {
+      console.log('LoginScreen: Attempting login...');
       await login(email, password);
+      console.log('LoginScreen: Login successful, waiting for navigation...');
       // Navigation will automatically handle transition to RoleSelection
       // because AuthContext state change triggers AppNavigator re-render
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Помилка входу');
-    } finally {
+      console.error('LoginScreen: Login error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Помилка входу';
+      
+      // Check if it's invalid credentials (deleted user or wrong password)
+      if (errorMessage === 'INVALID_CREDENTIALS' || 
+          errorMessage.includes('Invalid login credentials') ||
+          errorMessage.includes('Invalid credentials')) {
+        setIsDeletedUser(true);
+        setError('❌ Цей акаунт не існує або був видалений.\nБудь ласка, зареєструйтесь знову.');
+      } else {
+        setIsDeletedUser(false);
+        setError(errorMessage);
+      }
       setIsLoading(false);
+    }
+  };
+
+  const handleTryAgain = () => {
+    setError(null);
+    setIsDeletedUser(false);
+    setPassword('');
+  };
+
+  const handleRegister = () => {
+    setError(null);
+    setIsDeletedUser(false);
+    if (onSwitchToRegister) {
+      onSwitchToRegister();
     }
   };
 
@@ -72,8 +106,26 @@ const LoginScreen: React.FC = () => {
           />
 
           {error && (
-            <View style={styles.errorContainer}>
+            <View style={[styles.errorContainer, isDeletedUser && styles.errorContainerDeleted]}>
               <Text style={styles.errorText}>{error}</Text>
+              {isDeletedUser && (
+                <View style={styles.errorActions}>
+                  <TouchableOpacity
+                    style={styles.registerButton}
+                    onPress={handleRegister}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.registerButtonText}>Зареєструватися</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.tryAgainButton}
+                    onPress={handleTryAgain}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.tryAgainButtonText}>Спробувати ще раз</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 
@@ -88,6 +140,16 @@ const LoginScreen: React.FC = () => {
               <Text style={styles.buttonText}>Увійти</Text>
             )}
           </TouchableOpacity>
+
+          {onSwitchToRegister && (
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={onSwitchToRegister}
+              disabled={isLoading}
+            >
+              <Text style={styles.linkText}>Немає акаунту? Зареєструватися</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </View>
@@ -146,8 +208,47 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
   },
+  errorContainerDeleted: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fed7aa',
+  },
   errorText: {
     color: '#dc2626',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  registerButton: {
+    flex: 1,
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  registerButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  tryAgainButton: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  tryAgainButtonText: {
+    color: '#64748b',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -167,6 +268,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 2,
+  },
+  linkButton: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  linkText: {
+    color: '#2563eb',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 
