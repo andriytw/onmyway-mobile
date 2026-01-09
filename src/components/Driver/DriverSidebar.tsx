@@ -15,44 +15,71 @@ import {
   Image,
   Modal,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {
+  Calendar,
+  Clock,
+  Wallet,
+  CreditCard,
+  Car,
+  FileText,
+  Bell,
+  HelpCircle,
+  Settings,
+  LogOut,
+  ChevronRight,
+  Star,
+  X,
+} from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../../contexts/DriverContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserRole } from '../../types/auth.types';
 import DriverCalendarView from './DriverCalendarView';
 import { COLORS, TYPOGRAPHY, SHADOWS } from '../../styles/designTokens';
+
+type LucideIcon = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+
+type MenuItem = { id: string; Icon: LucideIcon; label: string; route?: string };
+
+const STROKE = 1.5;
+const ICON_DEFAULT = COLORS.slate[600]; // slate-600
+const ICON_ACTIVE = COLORS.blue[600];  // blue-600
 
 interface DriverSidebarProps {
   navigation: any; // Drawer navigation prop
 }
 
 const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { isOnline, setOnline, driverProfile } = useDriver();
-  const { logout, switchRole } = useAuth();
+  const { logout } = useAuth();
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
+  // Get active route from navigation state
+  const navigationState = navigation?.getState?.();
+  const activeRoute = navigationState?.routes?.[navigationState?.index]?.name;
+
   // Моя робота
-  const workItems = [
-    { id: 'history', icon: 'history', label: 'Історія замовлень' },
-    { id: 'earnings', icon: 'wallet', label: 'Заробіток' },
-    { id: 'payouts', icon: 'credit-card', label: 'Баланс / Виплати' },
+  const workItems: Array<MenuItem> = [
+    { id: 'history', Icon: Clock, label: 'Історія замовлень', route: 'History' },
+    { id: 'earnings', Icon: Wallet, label: 'Заробіток', route: 'Earnings' },
+    { id: 'payouts', Icon: CreditCard, label: 'Баланс / Виплати', route: 'Payouts' },
   ];
 
   // Авто та документи
-  const vehicleItems = [
-    { id: 'vehicle', icon: 'car', label: 'Моє авто' },
-    { id: 'documents', icon: 'file-document', label: 'Документи' },
+  const vehicleItems: Array<MenuItem> = [
+    { id: 'vehicle', Icon: Car, label: 'Моє авто', route: 'Vehicle' },
+    { id: 'documents', Icon: FileText, label: 'Документи', route: 'Documents' },
   ];
 
   // Комунікація і безпека
-  const communicationItems = [
-    { id: 'notifications', icon: 'bell', label: 'Сповіщення' },
-    { id: 'support', icon: 'help-circle', label: 'Підтримка / SOS' },
+  const communicationItems: Array<MenuItem> = [
+    { id: 'notifications', Icon: Bell, label: 'Сповіщення', route: 'Notifications' },
+    { id: 'support', Icon: HelpCircle, label: 'Підтримка / SOS', route: 'Support' },
   ];
 
   // Налаштування
-  const settingsItems = [
-    { id: 'settings', icon: 'cog', label: 'Налаштування' },
+  const settingsItems: Array<MenuItem> = [
+    { id: 'settings', Icon: Settings, label: 'Налаштування', route: 'Settings' },
   ];
 
   const handleToggleOnline = async (value: boolean) => {
@@ -69,15 +96,6 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
       navigation?.closeDrawer();
     } catch (error) {
       console.error('Logout error:', error);
-    }
-  };
-
-  const handleSwitchRole = async () => {
-    try {
-      await switchRole(UserRole.PASSENGER_SENDER);
-      navigation?.closeDrawer();
-    } catch (error) {
-      console.error('Switch role error:', error);
     }
   };
 
@@ -109,7 +127,7 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
     <>
       <ScrollView style={styles.container}>
         {/* Header with Profile */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 8, 44) }]}>
           <View style={styles.profileContainer}>
             <Image
               source={{ uri: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Driver' }}
@@ -120,7 +138,7 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
                 {driverProfile?.name || 'Водій'}
               </Text>
               <View style={styles.ratingContainer}>
-                <Icon name="star" size={12} color="#fbbf24" />
+                <Star size={12} color="#fbbf24" fill="#fbbf24" strokeWidth={STROKE} />
                 <Text style={styles.rating}>
                   {driverProfile?.rating?.toFixed(1) || '4.9'}
                 </Text>
@@ -134,119 +152,239 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
           </View>
 
           {/* Online/Offline Toggle */}
-          <TouchableOpacity
-            style={[styles.toggleButton, isOnline && styles.toggleButtonOnline]}
-          onPress={() => handleToggleOnline(!isOnline)}
-          activeOpacity={0.95}
-          >
-            <View style={[styles.toggleDot, isOnline && styles.toggleDotOnline]} />
-            <Text style={styles.toggleText}>
-              {isOnline ? 'Онлайн' : 'Офлайн'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.availabilityRow}>
+            <View style={styles.availabilityLeft}>
+              <View
+                style={[
+                  styles.statusDot,
+                  !isOnline && styles.statusDotOffline,
+                ]}
+              />
+              <Text style={styles.availabilityText}>
+                {isOnline ? 'ОНЛАЙН' : 'ОФЛАЙН'}
+              </Text>
+            </View>
+            <Switch
+              value={isOnline}
+              onValueChange={(v) => handleToggleOnline(v)}
+              trackColor={{ false: '#CBD5E1', true: '#34D399' }}
+              thumbColor="#FFFFFF"
+              ios_backgroundColor="#CBD5E1"
+            />
+          </View>
         </View>
 
         {/* Menu Items */}
         <View style={styles.menuContent}>
           {/* Calendar */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => handleSectionPress('calendar')}
-            activeOpacity={0.95}
-          >
-            <View style={styles.menuItemLeft}>
-              <View style={[styles.iconContainer, styles.iconContainerBlue]}>
-                <Icon name="calendar" size={20} color="#3b82f6" />
-              </View>
-              <View>
-                <Text style={styles.menuItemLabel}>Календар</Text>
-                <Text style={styles.menuItemSubtext}>Заплановані поїздки</Text>
-              </View>
-            </View>
-            <Icon name="chevron-right" size={18} color="#e2e8f0" />
-          </TouchableOpacity>
+          {(() => {
+            const isCalendarActive = activeSection === 'calendar';
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  isCalendarActive && styles.menuItemActive,
+                ]}
+                onPress={() => handleSectionPress('calendar')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.menuItemLeft}>
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      styles.iconContainerBlue,
+                      isCalendarActive && styles.iconContainerActive,
+                    ]}
+                  >
+                    <Calendar
+                      size={18}
+                      color={isCalendarActive ? ICON_ACTIVE : ICON_ACTIVE}
+                      strokeWidth={STROKE}
+                    />
+                  </View>
+                  <View>
+                    <Text
+                      style={[
+                        styles.menuItemLabel,
+                        isCalendarActive && styles.menuItemTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Календар
+                    </Text>
+                    <Text style={styles.menuItemSubtext}>Заплановані поїздки</Text>
+                  </View>
+                </View>
+                <ChevronRight size={18} color={COLORS.slate[300]} strokeWidth={STROKE} />
+              </TouchableOpacity>
+            );
+          })()}
 
           {/* Моя робота */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Моя робота</Text>
-            {workItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                onPress={() => handleSectionPress(item.id)}
-                activeOpacity={0.95}
-              >
-                <View style={styles.menuItemLeft}>
-                  <View style={styles.iconContainer}>
-                    <Icon name={item.icon} size={20} color="#94a3b8" />
+            {workItems.map((item) => {
+              const IconComp = item.Icon;
+              const isActive = activeRoute === item.route;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.menuItem, isActive && styles.menuItemActive]}
+                  onPress={() => handleSectionPress(item.id)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <View
+                      style={[
+                        styles.iconContainer,
+                        isActive && styles.iconContainerActive,
+                      ]}
+                    >
+                      <IconComp
+                        size={18}
+                        color={isActive ? ICON_ACTIVE : ICON_DEFAULT}
+                        strokeWidth={STROKE}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuItemLabel,
+                        isActive && styles.menuItemTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.label}
+                    </Text>
                   </View>
-                  <Text style={styles.menuItemLabel}>{item.label}</Text>
-                </View>
-                <Icon name="chevron-right" size={18} color="#e2e8f0" />
-              </TouchableOpacity>
-            ))}
+                  <ChevronRight size={18} color={COLORS.slate[300]} strokeWidth={STROKE} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Авто та документи */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Авто та документи</Text>
-            {vehicleItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                onPress={() => handleSectionPress(item.id)}
-                activeOpacity={0.95}
-              >
-                <View style={styles.menuItemLeft}>
-                  <View style={styles.iconContainer}>
-                    <Icon name={item.icon} size={20} color="#94a3b8" />
+            {vehicleItems.map((item) => {
+              const IconComp = item.Icon;
+              const isActive = activeRoute === item.route;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.menuItem, isActive && styles.menuItemActive]}
+                  onPress={() => handleSectionPress(item.id)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <View
+                      style={[
+                        styles.iconContainer,
+                        isActive && styles.iconContainerActive,
+                      ]}
+                    >
+                      <IconComp
+                        size={18}
+                        color={isActive ? ICON_ACTIVE : ICON_DEFAULT}
+                        strokeWidth={STROKE}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuItemLabel,
+                        isActive && styles.menuItemTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.label}
+                    </Text>
                   </View>
-                  <Text style={styles.menuItemLabel}>{item.label}</Text>
-                </View>
-                <Icon name="chevron-right" size={18} color="#e2e8f0" />
-              </TouchableOpacity>
-            ))}
+                  <ChevronRight size={18} color={COLORS.slate[300]} strokeWidth={STROKE} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Комунікація і безпека */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Комунікація і безпека</Text>
-            {communicationItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                onPress={() => handleSectionPress(item.id)}
-                activeOpacity={0.95}
-              >
-                <View style={styles.menuItemLeft}>
-                  <View style={styles.iconContainer}>
-                    <Icon name={item.icon} size={20} color="#94a3b8" />
+            {communicationItems.map((item) => {
+              const IconComp = item.Icon;
+              const isActive = activeRoute === item.route;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.menuItem, isActive && styles.menuItemActive]}
+                  onPress={() => handleSectionPress(item.id)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <View
+                      style={[
+                        styles.iconContainer,
+                        isActive && styles.iconContainerActive,
+                      ]}
+                    >
+                      <IconComp
+                        size={18}
+                        color={isActive ? ICON_ACTIVE : ICON_DEFAULT}
+                        strokeWidth={STROKE}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuItemLabel,
+                        isActive && styles.menuItemTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.label}
+                    </Text>
                   </View>
-                  <Text style={styles.menuItemLabel}>{item.label}</Text>
-                </View>
-                <Icon name="chevron-right" size={18} color="#e2e8f0" />
-              </TouchableOpacity>
-            ))}
+                  <ChevronRight size={18} color={COLORS.slate[300]} strokeWidth={STROKE} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Налаштування */}
           <View style={styles.section}>
-            {settingsItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.menuItem}
-                onPress={() => handleSectionPress(item.id)}
-                activeOpacity={0.95}
-              >
-                <View style={styles.menuItemLeft}>
-                  <View style={styles.iconContainer}>
-                    <Icon name={item.icon} size={20} color="#94a3b8" />
+            {settingsItems.map((item) => {
+              const IconComp = item.Icon;
+              const isActive = activeRoute === item.route;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.menuItem, isActive && styles.menuItemActive]}
+                  onPress={() => handleSectionPress(item.id)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <View
+                      style={[
+                        styles.iconContainer,
+                        isActive && styles.iconContainerActive,
+                      ]}
+                    >
+                      <IconComp
+                        size={18}
+                        color={isActive ? ICON_ACTIVE : ICON_DEFAULT}
+                        strokeWidth={STROKE}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuItemLabel,
+                        isActive && styles.menuItemTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.label}
+                    </Text>
                   </View>
-                  <Text style={styles.menuItemLabel}>{item.label}</Text>
-                </View>
-                <Icon name="chevron-right" size={18} color="#e2e8f0" />
-              </TouchableOpacity>
-            ))}
+                  <ChevronRight size={18} color={COLORS.slate[300]} strokeWidth={STROKE} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       </ScrollView>
@@ -254,21 +392,13 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
       {/* Footer Actions */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.footerButton}
-          onPress={handleSwitchRole}
-          activeOpacity={0.95}
-        >
-          <Icon name="swap-horizontal" size={16} color="#2563eb" />
-          <Text style={styles.footerButtonText}>Перемкнутися на пасажира</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={[styles.footerButton, styles.footerButtonLogout]}
           onPress={handleLogout}
           activeOpacity={0.95}
         >
-          <Icon name="logout" size={16} color="#dc2626" />
+          <LogOut size={14} color={COLORS.red[600]} strokeWidth={STROKE} />
           <Text style={[styles.footerButtonText, styles.footerButtonTextLogout]}>
-            Вийти з системи
+            Log Out
           </Text>
         </TouchableOpacity>
       </View>
@@ -288,7 +418,7 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
                 onPress={() => setActiveSection(null)}
                 style={styles.modalCloseButton}
               >
-                <Icon name="close" size={20} color="#64748b" />
+                <X size={20} color={COLORS.slate[500]} strokeWidth={STROKE} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalBody}>
@@ -307,9 +437,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   header: {
-    paddingTop: 50, // Compact padding (~17% reduction)
+    // paddingTop will be set dynamically via inline style using safe-area insets
     paddingHorizontal: 20,
-    paddingBottom: 14, // Compact padding (~30% reduction)
+    paddingBottom: 10, // 14 → 10px (~29% reduction)
     backgroundColor: '#f8fafc',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
@@ -317,7 +447,7 @@ const styles = StyleSheet.create({
   profileContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10, // Compact spacing (~38% reduction)
+    marginBottom: 6, // 10 → 6px (40% reduction)
   },
   avatar: {
     width: 56,
@@ -333,13 +463,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600', // font-semibold
     color: COLORS.slate[900], // text-slate-900 (main text)
-    marginBottom: 4, // Compact spacing (50% reduction)
+    marginBottom: 2, // 4 → 2px (50% reduction)
     letterSpacing: TYPOGRAPHY.trackingTight(18), // tracking-tight for headings >20px
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4, // Compact spacing (~33% reduction)
+    marginBottom: 2, // 4 → 2px (50% reduction)
   },
   rating: {
     fontSize: 11,
@@ -354,13 +484,43 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  availabilityRow: {
+    marginTop: 10,
+    height: 44, // iOS touch target
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(2, 6, 23, 0.04)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  availabilityLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#34D399', // online dot (emerald-400)
+  },
+  statusDotOffline: {
+    backgroundColor: '#94A3B8', // offline dot (slate-400)
+  },
+  availabilityText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    letterSpacing: 0.5,
+  },
   toggleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10, // Compact padding (~29% reduction)
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    minHeight: 40, // Compact touch target (~9% reduction)
+    minHeight: 44, // Ensure touch target >= 44px
     backgroundColor: '#0f172a',
     borderRadius: 12, // rounded-xl (Linear/Vercel style)
     gap: 8,
@@ -386,12 +546,12 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   menuContent: {
-    paddingTop: 10, // Compact padding (~38% reduction)
+    paddingTop: 6, // 10 → 6px (40% reduction)
     paddingHorizontal: 12,
-    paddingBottom: 14, // Compact padding (~30% reduction)
+    paddingBottom: 10, // 14 → 10px (~29% reduction)
   },
   section: {
-    marginBottom: 12, // Compact spacing (~33% reduction from 18px)
+    marginBottom: 8, // 12 → 8px (~33% reduction)
   },
   sectionTitle: {
     fontSize: 10,
@@ -399,17 +559,22 @@ const styles = StyleSheet.create({
     color: COLORS.slate[500], // text-slate-500 (secondary text)
     textTransform: 'uppercase',
     letterSpacing: 2,
-    marginBottom: 6, // Compact spacing (~40% reduction from 10px)
+    marginTop: 14, // Add top margin for section separation
+    marginBottom: 6, // Keep readable
     paddingHorizontal: 8,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12, // Compact padding (~25% reduction)
-    paddingHorizontal: 16,
+    height: 50, // Set height for touch target (48-52 target, touch >= 44px)
+    paddingVertical: 10, // 12 → 10px (~17% reduction)
+    paddingHorizontal: 10, // Add horizontal padding
     borderRadius: 24, // rounded-2xl (Linear/Vercel style)
-    marginBottom: 6, // Compact spacing (~25% reduction)
+    marginBottom: 4, // 6 → 4px (~33% reduction)
+  },
+  menuItemActive: {
+    backgroundColor: COLORS.blue[50], // Active background
   },
   menuItemLeft: {
     flexDirection: 'row',
@@ -417,24 +582,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 44, // w-11 h-11 (Linear/Vercel style - touch target)
-    height: 44,
-    borderRadius: 16, // rounded-2xl
+    width: 38, // 44 → 38px (~14% reduction)
+    height: 38, // 44 → 38px (~14% reduction)
+    borderRadius: 12, // 16 → 12px (25% reduction)
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 10, // Add margin right
     ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
   },
   iconContainerBlue: {
-    borderColor: '#3b82f6',
+    borderColor: ICON_ACTIVE,
+  },
+  iconContainerActive: {
+    borderColor: ICON_ACTIVE,
+    backgroundColor: COLORS.blue[50],
   },
   menuItemLabel: {
-    fontSize: 14,
+    fontSize: 14, // 16 → 14px (text-sm)
     fontWeight: '600', // font-semibold
     color: COLORS.slate[900], // text-slate-900 (main text)
+  },
+  menuItemTextActive: {
+    color: ICON_ACTIVE,
   },
   menuItemSubtext: {
     fontSize: 9,
@@ -445,7 +617,7 @@ const styles = StyleSheet.create({
     marginTop: 4, // Compact spacing (50% reduction)
   },
   footer: {
-    padding: 14, // Compact padding (~30% reduction)
+    padding: 10, // 14 → 10px (~29% reduction)
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
     gap: 12,
@@ -454,8 +626,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10, // Compact padding (~29% reduction)
-    minHeight: 40, // Compact touch target (~9% reduction)
+    paddingVertical: 8, // 10 → 8px (20% reduction)
+    minHeight: 44, // 40 → 44px (ensure touch target)
     borderRadius: 12, // rounded-xl (Linear/Vercel style)
     borderWidth: 1,
     borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
@@ -463,11 +635,15 @@ const styles = StyleSheet.create({
     ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
   },
   footerButtonLogout: {
-    borderColor: COLORS.red[200], // border-red-200 (Linear/Vercel style)
+    borderWidth: 0, // Remove border
     backgroundColor: '#ffffff',
+    paddingVertical: 6, // Smaller padding
+    paddingHorizontal: 8, // Smaller horizontal padding
+    minHeight: 36, // Smaller height
+    gap: 6, // Smaller gap between icon and text
   },
   footerButtonText: {
-    fontSize: 11,
+    fontSize: 14, // 15 → 14px (text-sm)
     fontWeight: '600', // font-semibold
     color: COLORS.blue[600], // text-blue-600
     textTransform: 'uppercase',
@@ -475,6 +651,7 @@ const styles = StyleSheet.create({
   },
   footerButtonTextLogout: {
     color: '#dc2626',
+    fontSize: 12, // Smaller text
   },
   modalOverlay: {
     flex: 1,
@@ -493,7 +670,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16, // Compact padding (~33% reduction)
+    padding: 12, // 16 → 12px (25% reduction)
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
   },

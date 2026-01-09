@@ -34,7 +34,9 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>OnMyWay потребує доступ до вашої локації для показу карти та маршрутів</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>OnMyWay потребує доступ до вашої локації для показу карти та маршрутів</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

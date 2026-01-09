@@ -91,22 +91,32 @@ class MapboxMapService implements MapService {
       return new MockMapService().geocode(address);
     }
 
-    // TODO: Інтегрувати Mapbox Geocoding API
-    const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${this.token}`
-    );
-    const data: any = await response.json();
-    
-    if (data.features && data.features.length > 0) {
-      const feature = data.features[0];
-      return {
-        address: feature.place_name,
-        lat: feature.center[1],
-        lng: feature.center[0],
-      };
-    }
+    try {
+      const response = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${this.token}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Geocoding API error: ${response.status}`);
+      }
 
-    throw new Error('Address not found');
+      const data: any = await response.json();
+      
+      if (data.features && data.features.length > 0) {
+        const feature = data.features[0];
+        return {
+          address: feature.place_name || address,
+          lat: feature.center[1],
+          lng: feature.center[0],
+        };
+      }
+
+      throw new Error('Address not found');
+    } catch (error) {
+      console.error('Mapbox geocode error:', error);
+      // Fallback на мок при помилці
+      return new MockMapService().geocode(address);
+    }
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<string> {
@@ -114,17 +124,27 @@ class MapboxMapService implements MapService {
       return new MockMapService().reverseGeocode(lat, lng);
     }
 
-    // TODO: Інтегрувати Mapbox Reverse Geocoding
-    const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${this.token}`
-    );
-    const data: any = await response.json();
-    
-    if (data.features && data.features.length > 0) {
-      return data.features[0].place_name;
-    }
+    try {
+      const response = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${this.token}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Reverse geocoding API error: ${response.status}`);
+      }
 
-    return `Координати: ${lat}, ${lng}`;
+      const data: any = await response.json();
+      
+      if (data.features && data.features.length > 0) {
+        return data.features[0].place_name;
+      }
+
+      return `Координати: ${lat}, ${lng}`;
+    } catch (error) {
+      console.error('Mapbox reverseGeocode error:', error);
+      // Fallback на мок при помилці
+      return new MockMapService().reverseGeocode(lat, lng);
+    }
   }
 
   async calculateRoute(
@@ -135,21 +155,31 @@ class MapboxMapService implements MapService {
       return new MockMapService().calculateRoute(origin, destination);
     }
 
-    // TODO: Інтегрувати Mapbox Directions API
-    const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?access_token=${this.token}`
-    );
-    const data: any = await response.json();
-    
-    if (data.routes && data.routes.length > 0) {
-      const route = data.routes[0];
-      return {
-        distance: route.distance / 1000, // конвертуємо в км
-        duration: Math.round(route.duration / 60), // конвертуємо в хвилини
-      };
-    }
+    try {
+      const response = await fetch(
+        `https://api.mapbox.com/directions/v5/mapbox/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?access_token=${this.token}&geometries=geojson`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Directions API error: ${response.status}`);
+      }
 
-    throw new Error('Route calculation failed');
+      const data: any = await response.json();
+      
+      if (data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        return {
+          distance: Math.round((route.distance / 1000) * 10) / 10, // конвертуємо в км, округлюємо до 1 десяткової
+          duration: Math.round(route.duration / 60), // конвертуємо в хвилини
+        };
+      }
+
+      throw new Error('Route calculation failed: no routes found');
+    } catch (error) {
+      console.error('Mapbox calculateRoute error:', error);
+      // Fallback на мок при помилці
+      return new MockMapService().calculateRoute(origin, destination);
+    }
   }
 }
 
