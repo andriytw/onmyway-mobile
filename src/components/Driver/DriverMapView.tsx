@@ -3,9 +3,10 @@
  * Apple Maps integration for Driver App (via react-native-maps)
  */
 
-import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { View, StyleSheet, Text, Platform } from 'react-native';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
+import { View, StyleSheet, Text, Platform, PermissionsAndroid } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
+import Geolocation from '@react-native-community/geolocation';
 import { useDriver } from '../../contexts/DriverContext';
 import { RouteStop } from '../../types/driver.types';
 
@@ -17,10 +18,35 @@ const DriverMapView: React.FC = () => {
     selectedDate,
     isInRoute,
     isOnline,
+    setMapCenterCallback,
   } = useDriver();
 
   const mapRef = useRef<MapView>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // Method to center map on user location
+  const centerOnUserLocation = useCallback((lat: number, lng: number) => {
+    if (mapRef.current && mapReady) {
+      mapRef.current.animateToRegion(
+        {
+          latitude: lat,
+          longitude: lng,
+          latitudeDelta: 0.05,
+          longitudeDelta: 0.05,
+        },
+        1000 // Animation duration in ms
+      );
+    }
+  }, [mapReady]);
+
+  // Register center callback on mount
+  useEffect(() => {
+    setMapCenterCallback(centerOnUserLocation);
+    return () => {
+      setMapCenterCallback(null);
+    };
+  }, [centerOnUserLocation, setMapCenterCallback]);
 
   // Convert RouteStop to coordinates array for route line (react-native-maps format)
   const routeCoordinates = useMemo<Array<{ latitude: number; longitude: number }>>(() => {
@@ -58,7 +84,52 @@ const DriverMapView: React.FC = () => {
     return coords;
   }, [previewRoute]);
 
-  // Calculate initial region (for Kyiv center or route bounds)
+  // Get user's current location on mount
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+      ).then((granted) => {
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          Geolocation.getCurrentPosition(
+            (position) => {
+              setUserLocation({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+              });
+            },
+            (error) => {
+              console.error('Error getting location:', error);
+              // Fallback to Kyiv
+              setUserLocation({ latitude: 50.4501, longitude: 30.5234 });
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+          );
+        } else {
+          // Fallback to Kyiv if permission denied
+          setUserLocation({ latitude: 50.4501, longitude: 30.5234 });
+        }
+      });
+    } else {
+      // iOS
+      Geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          // Fallback to Kyiv
+          setUserLocation({ latitude: 50.4501, longitude: 30.5234 });
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    }
+  }, []);
+
+  // Calculate initial region (user location, route bounds, or Kyiv center)
   const initialRegion = useMemo<Region>(() => {
     if (routeCoordinates.length > 0) {
       const lats = routeCoordinates.map(c => c.latitude);
@@ -78,14 +149,23 @@ const DriverMapView: React.FC = () => {
         longitudeDelta: Math.max(lngDelta, 0.05),
       };
     }
-    // Default: Kyiv center (as per requirements)
+    // Use user location if available, otherwise Kyiv center
+    if (userLocation) {
+      return {
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      };
+    }
+    // Default: Kyiv center
     return {
       latitude: 50.4501,
       longitude: 30.5234,
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     };
-  }, [routeCoordinates]);
+  }, [routeCoordinates, userLocation]);
 
   // Filter available passengers by selected date
   const filteredPassengers = useMemo(() => {
@@ -106,6 +186,18 @@ const DriverMapView: React.FC = () => {
       });
     }
   }, [routeCoordinates, mapReady]);
+
+  // Center map on user location when map is ready and no route exists
+  useEffect(() => {
+    if (userLocation && mapRef.current && mapReady && routeCoordinates.length === 0) {
+      mapRef.current.animateToRegion({
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      }, 1000);
+    }
+  }, [userLocation, mapReady, routeCoordinates.length]);
 
   return (
     <View style={StyleSheet.absoluteFill}>

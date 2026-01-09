@@ -4,7 +4,7 @@
  * Full version with all menu sections
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -29,12 +29,16 @@ import {
   ChevronRight,
   Star,
   X,
+  Map,
+  User,
+  Package,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDriver } from '../../contexts/DriverContext';
 import { useAuth } from '../../contexts/AuthContext';
 import DriverCalendarView from './DriverCalendarView';
 import { COLORS, TYPOGRAPHY, SHADOWS } from '../../styles/designTokens';
+import { ScheduledRide, PassengerParcelInput } from '../../types/driver.types';
 
 type LucideIcon = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
@@ -50,9 +54,13 @@ interface DriverSidebarProps {
 
 const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { isOnline, setOnline, driverProfile } = useDriver();
+  const { isOnline, setOnline, driverProfile, scheduledRides, setOriginAddress, setDestinationAddress, createRoute, setPreviewRouteFromScheduledRide } = useDriver();
   const { logout } = useAuth();
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [expandedRouteId, setExpandedRouteId] = useState<string | null>(null);
+  const [showRouteTypeModal, setShowRouteTypeModal] = useState(false);
+  const [selectedRouteGroup, setSelectedRouteGroup] = useState<{ date: string; rides: ScheduledRide[] } | null>(null);
+  const [routeTypeAction, setRouteTypeAction] = useState<'show' | 'start' | null>(null);
 
   // Get active route from navigation state
   const navigationState = navigation?.getState?.();
@@ -63,6 +71,7 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
     { id: 'history', Icon: Clock, label: 'Історія замовлень', route: 'History' },
     { id: 'earnings', Icon: Wallet, label: 'Заробіток', route: 'Earnings' },
     { id: 'payouts', Icon: CreditCard, label: 'Баланс / Виплати', route: 'Payouts' },
+    { id: 'planned-routes', Icon: Calendar, label: 'Заплановані маршрути', route: 'PlannedRoutes' },
   ];
 
   // Авто та документи
@@ -99,9 +108,129 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
     }
   };
 
+  // Utility to format date
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dayAfterTomorrow = new Date(today);
+    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Сьогодні';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Завтра';
+    } else if (date.toDateString() === dayAfterTomorrow.toDateString()) {
+      return 'Післязавтра';
+    } else {
+      return date.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+  };
+
+  // Filter and sort scheduled rides
+  const sortedScheduledRides = useMemo(() => {
+    return [...scheduledRides]
+      .filter(ride => {
+        const rideDate = new Date(ride.date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return rideDate >= today; // Only future routes
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) {
+          return dateA - dateB; // Sort by date
+        }
+        return a.time.localeCompare(b.time); // If date is same, sort by time
+      });
+  }, [scheduledRides]);
+
+  // Group ScheduledRide by date
+  const groupedScheduledRides = useMemo(() => {
+    const grouped: Record<string, ScheduledRide[]> = {};
+    
+    sortedScheduledRides.forEach(ride => {
+      const dateKey = ride.date;
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(ride);
+    });
+    
+    return Object.entries(grouped).map(([date, rides]) => ({
+      date,
+      rides,
+      passengerCount: rides.filter(r => r.type === 'passenger').length,
+      parcelCount: rides.filter(r => r.type === 'parcel').length,
+      // All addresses for display
+      allAddresses: rides.flatMap(r => [
+        { type: 'pickup' as const, address: r.pickup.address, ride: r },
+        { type: 'dropoff' as const, address: r.dropoff.address, ride: r },
+      ]),
+      // Start and end address (first pickup and last dropoff)
+      startAddress: rides[0]?.pickup.address,
+      endAddress: rides[rides.length - 1]?.dropoff.address,
+    }));
+  }, [sortedScheduledRides]);
+
+  const handleShowRouteOnMap = (routeGroup: { date: string; rides: ScheduledRide[] }) => {
+    // Close modal with planned routes (drawer slides away)
+    setActiveSection(null);
+    navigation?.closeDrawer();
+    
+    // Show route type selection modal
+    setSelectedRouteGroup(routeGroup);
+    setRouteTypeAction('show');
+    setShowRouteTypeModal(true);
+  };
+
+  const handleStartScheduledRoute = (routeGroup: { date: string; rides: ScheduledRide[] }) => {
+    // Show route type selection modal
+    setSelectedRouteGroup(routeGroup);
+    setRouteTypeAction('start');
+    setShowRouteTypeModal(true);
+  };
+
+  const handleRouteTypeSelected = async (optimized: boolean) => {
+    if (!selectedRouteGroup || !routeTypeAction) return;
+    
+    try {
+      // Convert all ScheduledRide to PassengerParcelInput[]
+      const passengersParcels: PassengerParcelInput[] = selectedRouteGroup.rides.map(ride => ({
+        id: ride.id,
+        type: ride.type,
+        pickup: ride.pickup.address,
+        dropoff: ride.dropoff.address,
+      }));
+      
+      // Determine start and end address
+      const originAddress = selectedRouteGroup.rides[0]?.pickup.address || '';
+      const destinationAddress = selectedRouteGroup.rides[selectedRouteGroup.rides.length - 1]?.dropoff.address || '';
+      
+      if (routeTypeAction === 'show') {
+        // Set route as previewRoute for display on main map
+        await setPreviewRouteFromScheduledRide(selectedRouteGroup.rides, optimized);
+      } else if (routeTypeAction === 'start') {
+        // Create route through createRoute
+        await createRoute(originAddress, destinationAddress, passengersParcels, optimized);
+        setActiveSection(null); // Close modal
+      }
+      
+      setShowRouteTypeModal(false);
+      setSelectedRouteGroup(null);
+      setRouteTypeAction(null);
+    } catch (error) {
+      console.error('Failed to process route:', error);
+    }
+  };
+
   const handleSectionPress = (sectionId: string) => {
     if (sectionId === 'calendar') {
       setActiveSection('calendar');
+    } else if (sectionId === 'planned-routes') {
+      setActiveSection('planned-routes');
     } else {
       // Navigate to screens
       const screenMap: Record<string, string> = {
@@ -225,7 +354,7 @@ const DriverSidebar: React.FC<DriverSidebarProps> = ({ navigation }) => {
             <Text style={styles.sectionTitle}>Моя робота</Text>
             {workItems.map((item) => {
               const IconComp = item.Icon;
-              const isActive = activeRoute === item.route;
+              const isActive = activeRoute === item.route || (item.id === 'planned-routes' && activeSection === 'planned-routes');
               return (
                 <TouchableOpacity
                   key={item.id}
@@ -686,6 +815,182 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     flex: 1,
+  },
+  // Planned Routes
+  plannedRouteCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.slate[200],
+    ...SHADOWS.sm,
+  },
+  plannedRouteDate: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.slate[500],
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  plannedRouteContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  plannedRouteCounters: {
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  counterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  counterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.slate[900],
+  },
+  plannedRouteAddresses: {
+    flex: 1,
+    gap: 6,
+    marginRight: 12,
+  },
+  plannedRouteAddress: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.slate[900],
+    lineHeight: 18,
+  },
+  plannedRouteActions: {
+    flexDirection: 'column',
+    gap: 8,
+    alignItems: 'center',
+  },
+  plannedRouteShowButton: {
+    padding: 8,
+    backgroundColor: COLORS.blue[50],
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plannedRouteStartButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.blue[600],
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 70,
+  },
+  plannedRouteStartButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#ffffff',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  plannedRouteExpanded: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.slate[200],
+  },
+  plannedRouteExpandedTitle: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.slate[500],
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  plannedRouteAddressList: {
+    gap: 8,
+  },
+  plannedRouteAddressItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  plannedRouteAddressItemText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.slate[700],
+    flex: 1,
+  },
+  emptyState: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: COLORS.slate[500],
+  },
+  // Route Type Selection Modal
+  routeTypeModalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    margin: 20,
+    maxWidth: 400,
+    alignSelf: 'center',
+    ...SHADOWS.lg,
+  },
+  routeTypeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.slate[200],
+  },
+  routeTypeModalTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.slate[900],
+  },
+  routeTypeModalBody: {
+    padding: 16,
+    gap: 12,
+  },
+  routeTypeOptionButton: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.slate[200],
+    gap: 12,
+  },
+  routeTypeOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.sm,
+  },
+  routeTypeOptionIconGreen: {
+    backgroundColor: COLORS.green[50],
+  },
+  routeTypeOptionTextContent: {
+    flex: 1,
+  },
+  routeTypeOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.slate[900],
+    marginBottom: 4,
+  },
+  routeTypeOptionDescription: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.slate[600],
+    lineHeight: 18,
   },
 });
 

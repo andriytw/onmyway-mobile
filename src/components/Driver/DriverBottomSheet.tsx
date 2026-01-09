@@ -19,9 +19,15 @@ import {
   TextInput,
   ScrollView,
   Modal,
+  Alert,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
+import Geolocation from '@react-native-community/geolocation';
+import { mapService } from '../../services/maps/mapService';
 import BottomSheet, { BottomSheetView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MapPin, Target, Star } from 'lucide-react-native';
 import { useDriver } from '../../contexts/DriverContext';
 import { PassengerParcelInput } from '../../types/driver.types';
 import RouteStack from './RouteStack';
@@ -34,6 +40,7 @@ const DriverBottomSheet: React.FC = () => {
     isOnline,
     activeRequests,
     currentRoute,
+    routeStats,
     originAddress,
     destinationAddress,
     passengersParcels,
@@ -44,13 +51,18 @@ const DriverBottomSheet: React.FC = () => {
     removePassengerParcel,
     updatePassengerParcel,
     addStopToRoute,
+    addressHistory,
+    favoriteAddresses,
+    toggleFavoriteAddress,
+    centerMapOnUserLocation,
   } = useDriver();
 
   const [activeTab, setActiveTab] = useState<'route' | 'stats'>('route');
-  const [newDestination, setNewDestination] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [showAddPassengerParcel, setShowAddPassengerParcel] = useState(false);
   const [showRouteOptions, setShowRouteOptions] = useState(false);
+  const [pendingPassengerParcel, setPendingPassengerParcel] = useState<PassengerParcelInput | null>(null);
+  const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
   const [newPassengerParcel, setNewPassengerParcel] = useState<{
     type: 'passenger' | 'parcel';
     pickup: string;
@@ -67,36 +79,196 @@ const DriverBottomSheet: React.FC = () => {
 
   const bottomSheetRef = useRef<BottomSheet>(null);
 
+  // Компонент історії адрес
+  const AddressHistory: React.FC<{
+    onSelectAddress: (address: string) => void;
+    activeField: 'origin' | 'destination' | null;
+  }> = ({ onSelectAddress, activeField }) => {
+    // Об'єднати улюблені та історію (улюблені зверху)
+    const sortedAddresses = useMemo(() => {
+      const favorites = favoriteAddresses;
+      const history = addressHistory.filter(addr => !favorites.includes(addr));
+      return [...favorites, ...history];
+    }, [favoriteAddresses, addressHistory]);
+
+    if (sortedAddresses.length === 0) {
+      return null;
+    }
+
+    return (
+      <View style={styles.addressHistoryContainer}>
+        <ScrollView 
+          style={styles.addressHistoryScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {sortedAddresses.map((address, index) => {
+            const isFavorite = favoriteAddresses.includes(address);
+            return (
+              <TouchableOpacity
+                key={`${address}-${index}`}
+                style={styles.addressHistoryItem}
+                onPress={() => onSelectAddress(address)}
+                activeOpacity={0.7}
+              >
+                <TouchableOpacity
+                  style={styles.favoriteButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    toggleFavoriteAddress(address);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Star 
+                    size={16} 
+                    color={isFavorite ? COLORS.amber[500] : COLORS.slate[400]} 
+                    fill={isFavorite ? COLORS.amber[500] : 'transparent'}
+                    strokeWidth={2}
+                  />
+                </TouchableOpacity>
+                <Text style={styles.addressHistoryText} numberOfLines={1}>{address}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
   const hasRoute = currentRoute.length > 0;
   const canBuildRoute = originAddress.trim() && destinationAddress.trim();
   const showRoute = hasRoute;
   const showRequests = isOnline && activeRequests.length > 0 && hasRoute;
   const showAddressInput = !hasRoute;
 
-  // Snap points for bottom sheet
+  // Snap points for bottom sheet - завжди напіввисунутий при старті
   const snapPoints = useMemo(() => {
     if (showRoute || showRequests || canBuildRoute) {
       return ['25%', '50%', '90%'];
     }
-    return ['10%', '50%', '90%'];
+    // Завжди напіввисунутий (25%) навіть коли немає маршруту
+    return ['25%', '50%', '90%'];
   }, [showRoute, showRequests, canBuildRoute]);
 
-  const handleAutoLocate = () => {
+  const handleAutoLocate = async () => {
     setIsLocating(true);
-    setTimeout(() => {
-      setOriginAddress('Моє місцезнаходження');
+    try {
+      // Request location permissions
+      let permissionGranted = false;
+      
+      if (Platform.OS === 'ios') {
+        const status = await Geolocation.requestAuthorization('whenInUse');
+        permissionGranted = status === 'granted';
+      } else if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Дозвіл на місцезнаходження',
+            message: 'OnMyWay потребує доступ до вашої локації для показу карти та маршрутів',
+            buttonNeutral: 'Запитати пізніше',
+            buttonNegative: 'Відхилити',
+            buttonPositive: 'Дозволити',
+          }
+        );
+        permissionGranted = granted === PermissionsAndroid.RESULTS.GRANTED;
+      }
+
+      if (!permissionGranted) {
+        Alert.alert(
+          'Дозвіл на локацію відхилено',
+          'Будь ласка, надайте дозвіл на використання локації в налаштуваннях пристрою.',
+          [{ text: 'OK' }]
+        );
+        setIsLocating(false);
+        return;
+      }
+
+      // Get current location
+      Geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          
+          try {
+            // Reverse geocode to get address
+            const address = await mapService.reverseGeocode(latitude, longitude);
+            
+            // Set address in origin field
+            setOriginAddress(address || 'Моє місцезнаходження');
+            
+            // Center map on user location
+            centerMapOnUserLocation(latitude, longitude);
+            
+            setIsLocating(false);
+          } catch (geocodeError) {
+            console.error('Reverse geocoding error:', geocodeError);
+            // Fallback: use "My location" text and center map anyway
+            setOriginAddress('Моє місцезнаходження');
+            centerMapOnUserLocation(latitude, longitude);
+            setIsLocating(false);
+          }
+        },
+        (error) => {
+          console.error('Location error:', error);
+          Alert.alert(
+            'Помилка отримання локації',
+            'Не вдалося отримати ваше місцезнаходження. Переконайтеся, що GPS увімкнено.',
+            [{ text: 'OK' }]
+          );
+          setIsLocating(false);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    } catch (error) {
+      console.error('Auto locate error:', error);
+      Alert.alert(
+        'Помилка',
+        'Сталася помилка при отриманні локації. Спробуйте ще раз.',
+        [{ text: 'OK' }]
+      );
       setIsLocating(false);
-    }, 1200);
+    }
   };
 
-  const handleBuildRoute = () => {
-    if (canBuildRoute) {
-      setShowRouteOptions(true);
+  const handleBuildRoute = async () => {
+    if (!canBuildRoute) {
+      Alert.alert(
+        'Помилка',
+        'Будь ласка, заповніть поля "Звідки" та "Куди"',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    try {
+      // Одразу створюємо простий маршрут без пасажирів
+      await createRoute(originAddress, destinationAddress, [], false);
+    } catch (error: any) {
+      console.error('Failed to create route:', error);
+      Alert.alert(
+        'Помилка створення маршруту',
+        error?.message || 'Не вдалося створити маршрут. Перевірте адреси та спробуйте ще раз.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
   const handleBuildRouteAsIs = async () => {
-    if (canBuildRoute) {
+    // Якщо є pending пасажир/посилка - додаємо його до маршруту
+    if (pendingPassengerParcel) {
+      try {
+        const allPassengersParcels = [pendingPassengerParcel];
+        await createRoute(originAddress, destinationAddress, allPassengersParcels, false);
+        setPendingPassengerParcel(null);
+        setShowRouteOptions(false);
+        setNewPassengerParcel({
+          type: 'passenger',
+          pickup: '',
+          dropoff: '',
+        });
+      } catch (error) {
+        console.error('Failed to create route:', error);
+      }
+    } else if (canBuildRoute) {
+      // Стара логіка (якщо маршрут ще не побудований)
       try {
         await createRoute(originAddress, destinationAddress, passengersParcels, false);
         setShowRouteOptions(false);
@@ -107,7 +279,23 @@ const DriverBottomSheet: React.FC = () => {
   };
 
   const handleBuildRouteOptimized = async () => {
-    if (canBuildRoute) {
+    // Якщо є pending пасажир/посилка - додаємо його до маршруту з оптимізацією
+    if (pendingPassengerParcel) {
+      try {
+        const allPassengersParcels = [pendingPassengerParcel];
+        await createRoute(originAddress, destinationAddress, allPassengersParcels, true);
+        setPendingPassengerParcel(null);
+        setShowRouteOptions(false);
+        setNewPassengerParcel({
+          type: 'passenger',
+          pickup: '',
+          dropoff: '',
+        });
+      } catch (error) {
+        console.error('Failed to create route:', error);
+      }
+    } else if (canBuildRoute) {
+      // Стара логіка (якщо маршрут ще не побудований)
       try {
         await createRoute(originAddress, destinationAddress, passengersParcels, true);
         setShowRouteOptions(false);
@@ -150,38 +338,20 @@ const DriverBottomSheet: React.FC = () => {
         : undefined,
     };
 
-    addPassengerParcel(pp);
-    setShowAddPassengerParcel(false);
-    setNewPassengerParcel({
-      type: 'passenger',
-      pickup: '',
-      dropoff: '',
-    });
-  };
-
-  const handleAddNewDestination = async () => {
-    if (!newDestination.trim() || !hasRoute) return;
-
-    const manualRequest = {
-      id: `manual-${Date.now()}`,
-      type: 'passenger' as const,
-      pickup: currentRoute[currentRoute.length - 1].dropoff,
-      dropoff: {
-        x: 0,
-        y: 0,
-        address: newDestination,
-      },
-      distance: 0,
-      timeDeviation: 0,
-      date: new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      await addStopToRoute(manualRequest);
-      setNewDestination('');
-    } catch (error) {
-      console.error('Failed to add destination:', error);
+    // Якщо маршрут вже побудований - показуємо модальне вікно вибору типу маршруту
+    if (hasRoute) {
+      setPendingPassengerParcel(pp);
+      setShowAddPassengerParcel(false);
+      setShowRouteOptions(true);
+    } else {
+      // Стара логіка (якщо маршрут ще не побудований - не повинно статися, але на всяк випадок)
+      addPassengerParcel(pp);
+      setShowAddPassengerParcel(false);
+      setNewPassengerParcel({
+        type: 'passenger',
+        pickup: '',
+        dropoff: '',
+      });
     }
   };
 
@@ -195,7 +365,7 @@ const DriverBottomSheet: React.FC = () => {
               style={[styles.tab, activeTab === 'route' && styles.tabActive]}
               onPress={() => setActiveTab('route')}
             >
-              <Icon name="route" size={16} color={activeTab === 'route' ? '#0f172a' : '#94a3b8'} />
+              <Icon name="map-marker-path" size={16} color={activeTab === 'route' ? '#0f172a' : '#94a3b8'} />
               <Text style={[styles.tabText, activeTab === 'route' && styles.tabTextActive]}>
                 Маршрут
               </Text>
@@ -215,43 +385,21 @@ const DriverBottomSheet: React.FC = () => {
             <View style={styles.routeContent}>
               <View style={styles.routeHeader}>
                 <Text style={styles.routeTitle}>Поточний маршрут</Text>
-                {currentRoute.length > 0 && (
-                  <Text style={styles.routeCount}>{currentRoute.length} зупинок</Text>
+                {routeStats && (
+                  <Text style={styles.routeCount}>{routeStats.totalDistance} км</Text>
                 )}
               </View>
               <RouteStack />
 
-              {/* Add destination manually */}
-              <View style={styles.addDestinationSection}>
-                <Text style={styles.addDestinationLabel}>Додати адресу вручну</Text>
-                <View style={styles.addDestinationInput}>
-                  <View style={styles.addDestinationDot} />
-                  <TextInput
-                    style={styles.addDestinationTextInput}
-                    value={newDestination}
-                    onChangeText={setNewDestination}
-                    placeholder="Додати адресу (телефон, клієнт тощо)..."
-                    placeholderTextColor="#cbd5e1"
-                  />
-                  {newDestination && (
-                    <TouchableOpacity
-                      onPress={() => setNewDestination('')}
-                      style={styles.addDestinationClear}
-                    >
-                      <Icon name="close" size={18} color="#94a3b8" />
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity
-                    onPress={handleAddNewDestination}
-                    disabled={!newDestination.trim()}
-                    style={[
-                      styles.addDestinationButton,
-                      !newDestination.trim() && styles.addDestinationButtonDisabled,
-                    ]}
-                  >
-                    <Icon name="plus" size={20} color="#ffffff" />
-                  </TouchableOpacity>
-                </View>
+              {/* Add Passenger/Parcel Section */}
+              <View style={styles.addPassengerParcelSection}>
+                <TouchableOpacity
+                  style={styles.addPassengerParcelButton}
+                  onPress={handleAddPassengerParcelClick}
+                >
+                  <Icon name="account-plus" size={18} color={COLORS.blue[600]} />
+                  <Text style={styles.addPassengerParcelButtonText}>Додати пасажира / посилку</Text>
+                </TouchableOpacity>
               </View>
             </View>
           ) : (
@@ -267,19 +415,20 @@ const DriverBottomSheet: React.FC = () => {
     if (showAddressInput) {
       return (
         <View style={styles.content}>
-          <Text style={styles.inputTitle}>Вкажіть маршрут</Text>
+          <Text style={styles.inputTitle}>Створити основний маршрут</Text>
 
           {/* Base Route */}
           <View style={styles.baseRouteSection}>
-            <Text style={styles.baseRouteLabel}>Базовий маршрут</Text>
             <View style={styles.addressInput}>
-              <View style={styles.addressDotBlue} />
+              <MapPin size={16} color={COLORS.blue[600]} strokeWidth={2} />
               <TextInput
                 style={styles.addressTextInput}
                 value={originAddress}
                 onChangeText={setOriginAddress}
                 placeholder="Звідки їдемо?"
                 placeholderTextColor="#cbd5e1"
+                onFocus={() => setActiveField('origin')}
+                onBlur={() => setActiveField(null)}
               />
               {originAddress && !isLocating && (
                 <TouchableOpacity
@@ -302,13 +451,15 @@ const DriverBottomSheet: React.FC = () => {
             </View>
 
             <View style={styles.addressInput}>
-              <View style={styles.addressDotBlack} />
+              <Target size={16} color={COLORS.slate[900]} strokeWidth={2} />
               <TextInput
                 style={styles.addressTextInput}
                 value={destinationAddress}
                 onChangeText={setDestinationAddress}
                 placeholder="Куди прямуємо?"
                 placeholderTextColor="#cbd5e1"
+                onFocus={() => setActiveField('destination')}
+                onBlur={() => setActiveField(null)}
               />
               {destinationAddress && (
                 <TouchableOpacity
@@ -321,64 +472,27 @@ const DriverBottomSheet: React.FC = () => {
             </View>
           </View>
 
-          {/* Passengers / Parcels */}
-          <View style={styles.passengersSection}>
-            <View style={styles.passengersHeader}>
-              <Text style={styles.passengersLabel}>Пасажири / Посилки</Text>
-              <TouchableOpacity
-                style={styles.passengersAddButton}
-                onPress={handleAddPassengerParcelClick}
-              >
-                <Text style={styles.passengersAddButtonText}>+ Додати</Text>
-              </TouchableOpacity>
-            </View>
-
-            {passengersParcels.map((pp) => (
-              <View key={pp.id} style={styles.passengerCard}>
-                <View style={styles.passengerCardHeader}>
-                  <Text style={styles.passengerCardType}>
-                    {pp.type === 'passenger' ? '👤 Пасажир' : '📦 Посилка'}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => removePassengerParcel(pp.id)}
-                    style={styles.passengerCardRemove}
-                  >
-                    <Icon name="close" size={18} color="#94a3b8" />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.passengerCardInputs}>
-                  <View style={styles.passengerCardInput}>
-                    <Text style={styles.passengerCardInputLabel}>Забрати</Text>
-                    <TextInput
-                      style={styles.passengerCardTextInput}
-                      value={pp.pickup}
-                      onChangeText={(text) => updatePassengerParcel(pp.id, { pickup: text })}
-                      placeholder="Адреса забрання"
-                      placeholderTextColor="#cbd5e1"
-                    />
-                  </View>
-                  <View style={styles.passengerCardInput}>
-                    <Text style={styles.passengerCardInputLabel}>Привезти</Text>
-                    <TextInput
-                      style={styles.passengerCardTextInput}
-                      value={pp.dropoff}
-                      onChangeText={(text) => updatePassengerParcel(pp.id, { dropoff: text })}
-                      placeholder="Адреса доставки"
-                      placeholderTextColor="#cbd5e1"
-                    />
-                  </View>
-                </View>
-              </View>
-            ))}
-
-            {passengersParcels.length === 0 && (
-              <View style={styles.passengersEmpty}>
-                <Text style={styles.passengersEmptyText}>
-                  Немає додаткових пасажирів або посилок
-                </Text>
-              </View>
-            )}
-          </View>
+          {/* Address History */}
+          <AddressHistory 
+            onSelectAddress={(address) => {
+              if (activeField === 'origin') {
+                setOriginAddress(address);
+              } else if (activeField === 'destination') {
+                setDestinationAddress(address);
+              } else {
+                // Якщо немає активного поля, вставляємо в перше порожнє
+                if (!originAddress) {
+                  setOriginAddress(address);
+                } else if (!destinationAddress) {
+                  setDestinationAddress(address);
+                } else {
+                  // Якщо обидва заповнені, вставляємо в destination
+                  setDestinationAddress(address);
+                }
+              }
+            }}
+            activeField={activeField}
+          />
 
           {/* Build Route Button */}
           {canBuildRoute && (
@@ -709,7 +823,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8, // Compact padding (~33% reduction)
+    paddingVertical: 6.4, // Reduced by 20% (8 * 0.8)
     paddingHorizontal: 16, // px-4
     borderRadius: 16, // rounded-2xl
     gap: 8, // gap-2
@@ -753,56 +867,28 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: TYPOGRAPHY.trackingWidest(10), // tracking-widest = 1px
   },
-  addDestinationSection: {
-    paddingTop: 10, // Compact padding (~38% reduction)
+  // Add Passenger/Parcel Section
+  addPassengerParcelSection: {
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: COLORS.slate[100], // border-slate-100
+    borderTopColor: COLORS.slate[100],
   },
-  addDestinationLabel: {
-    fontSize: 10, // text-[10px]
-    fontWeight: '600', // font-semibold
-    color: COLORS.slate[500], // text-slate-500 (secondary text)
-    textTransform: 'uppercase',
-    letterSpacing: TYPOGRAPHY.trackingWidest(10), // tracking-widest = 1px
-    marginBottom: 8, // Compact spacing (~33% reduction)
-  },
-  addDestinationInput: {
+  addPassengerParcelButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10, // Compact padding (~29% reduction)
-    paddingHorizontal: 16, // px-4
-    backgroundColor: COLORS.slate[50], // bg-slate-50
-    borderRadius: 12, // rounded-xl (Linear/Vercel style)
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.blue[50],
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
-    gap: 12, // Compact spacing (~25% reduction)
-    ...SHADOWS.sm, // shadow-sm for depth
+    borderColor: COLORS.blue[200],
+    gap: 8,
   },
-  addDestinationDot: {
-    width: 10, // w-2.5 = 10px
-    height: 10, // h-2.5 = 10px
-    borderRadius: 2, // rounded-sm для чорного
-    backgroundColor: COLORS.slate[900], // bg-slate-900
-    ...SHADOWS.sm, // shadow-sm (subtle shadow)
-  },
-  addDestinationTextInput: {
-    flex: 1,
-    fontSize: 16, // text-[16px]
-    fontWeight: '500', // font-medium (Linear/Vercel style for UI text)
-    color: COLORS.slate[900], // text-slate-900 (main text)
-  },
-  addDestinationClear: {
-    padding: 4, // p-1
-  },
-  addDestinationButton: {
-    padding: 10, // p-2.5
-    backgroundColor: COLORS.blue[600], // bg-blue-600
-    borderRadius: 12, // rounded-xl (Linear/Vercel style)
-    minHeight: 44, // Touch target (Linear/Vercel style)
-    ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
-  },
-  addDestinationButtonDisabled: {
-    backgroundColor: COLORS.slate[200], // bg-slate-200
+  addPassengerParcelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.blue[600],
   },
   // Stats Content
   statsContent: {
@@ -824,6 +910,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: TYPOGRAPHY.tracking025(11), // tracking-[0.25em] = 2.75px
     marginBottom: 12, // Compact spacing (~40% reduction)
+    textAlign: 'center', // Center align
   },
   baseRouteSection: {
     gap: 12,
@@ -840,7 +927,10 @@ const styles = StyleSheet.create({
   addressInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12, // Compact padding (~25% reduction)
+    paddingVertical: 10, // Fixed height for compactness
+    paddingHorizontal: 12,
+    minHeight: 44, // Consistent height for all inputs
+    maxHeight: 44, // Prevent expansion
     backgroundColor: COLORS.slate[50], // bg-slate-50
     borderRadius: 24, // rounded-[24px]
     borderWidth: 1,
@@ -848,31 +938,53 @@ const styles = StyleSheet.create({
     gap: 12, // Compact spacing (~25% reduction)
     ...SHADOWS.sm, // shadow-sm for depth
   },
-  addressDotBlue: {
-    width: 10, // w-2.5
-    height: 10, // h-2.5
-    borderRadius: 5, // rounded-full для синього
-    backgroundColor: COLORS.blue[500], // bg-blue-500
-    ...createShadow('lg', COLORS.blue[500]), // shadow-lg shadow-blue-500/40
-  },
-  addressDotBlack: {
-    width: 10, // w-2.5
-    height: 10, // h-2.5
-    borderRadius: 2, // rounded-sm для чорного
-    backgroundColor: COLORS.slate[900], // bg-slate-900
-    ...SHADOWS.lg, // shadow-lg shadow-black/20
-  },
   addressTextInput: {
     flex: 1,
-    fontSize: 16, // text-[16px]
+    fontSize: 15, // Slightly reduced for compactness (16 * 0.9375)
     fontWeight: '500', // font-medium (Linear/Vercel style for UI text)
     color: COLORS.slate[900], // text-slate-900 (main text)
+    paddingVertical: 0, // Remove vertical padding for compactness
+    height: 24, // Fixed height for text input
   },
   addressClear: {
     padding: 4,
   },
   addressLocate: {
-    padding: 6,
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 28,
+    minHeight: 28,
+  },
+  // Address History
+  addressHistoryContainer: {
+    marginTop: 12,
+    maxHeight: 150,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.slate[200],
+    paddingTop: 8,
+  },
+  addressHistoryScroll: {
+    maxHeight: 150,
+  },
+  addressHistoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 4,
+    backgroundColor: COLORS.slate[50],
+  },
+  favoriteButton: {
+    padding: 4,
+    marginRight: 8,
+  },
+  addressHistoryText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.slate[900],
   },
   // Passengers Section
   passengersSection: {

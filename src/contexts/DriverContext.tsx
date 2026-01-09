@@ -4,6 +4,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RouteStop, ActiveRequest, DriverProfile, RouteStats, ScheduledRide, CompatiblePassenger, PassengerParcelInput } from '../types/driver.types';
 import { driverService } from '../services/driver/driverService';
 import { routeService } from '../services/driver/routeService';
@@ -13,6 +14,14 @@ import { pointOptimizationService } from '../services/driver/pointOptimizationSe
 import { convertPointsToRouteStops } from '../services/driver/routeDisplayUtils';
 import { RoutePointDisplay } from '../types/driver.types';
 import { getDateString } from '../services/mock/mockData';
+
+// AsyncStorage keys
+const ADDRESS_HISTORY_KEY = '@driver_address_history';
+const FAVORITE_ADDRESSES_KEY = '@driver_favorite_addresses';
+
+// Максимальна кількість
+const MAX_HISTORY = 50;
+const MAX_FAVORITES = 10;
 
 interface DriverContextType {
   isOnline: boolean;
@@ -52,6 +61,15 @@ interface DriverContextType {
   clearPreview: () => void;
   calculateRouteDeviation: (fromIndex: number, toIndex: number) => { distance: number; time: number };
   updateRouteFromPoints: (points: RoutePointDisplay[]) => Promise<void>;
+  setPreviewRouteFromScheduledRide: (rides: ScheduledRide[], optimized: boolean) => Promise<void>;
+  addressHistory: string[];
+  favoriteAddresses: string[];
+  loadAddressHistory: () => Promise<void>;
+  saveAddressHistory: (address: string) => Promise<void>;
+  toggleFavoriteAddress: (address: string) => Promise<void>;
+  clearAddressHistory: () => Promise<void>;
+  setMapCenterCallback: (callback: ((lat: number, lng: number) => void) | null) => void;
+  centerMapOnUserLocation: (lat: number, lng: number) => void;
 }
 
 const DriverContext = createContext<DriverContextType | undefined>(undefined);
@@ -83,6 +101,9 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
   const [ignoredPassengers, setIgnoredPassengers] = useState<Set<string>>(new Set());
   const [previewRoute, setPreviewRoute] = useState<RouteStop[] | null>(null);
   const [previewDeviation, setPreviewDeviation] = useState<{ distance: number; time: number } | null>(null);
+  const [addressHistory, setAddressHistory] = useState<string[]>([]);
+  const [favoriteAddresses, setFavoriteAddresses] = useState<string[]>([]);
+  const [mapCenterCallback, setMapCenterCallbackState] = useState<((lat: number, lng: number) => void) | null>(null);
 
   // Визначаємо, чи водій в дорозі (є активний маршрут з більш ніж базовою зупинкою)
   const isInRoute = currentRoute.length > 1 || (currentRoute.length === 1 && currentRoute[0].id !== 'base-route');
@@ -281,11 +302,15 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
       
       setCurrentRoute(routeWithETA);
       await driverService.updateRoute(routeWithETA);
+      
+      // Зберігаємо адреси в історію
+      await saveAddressHistory(origin);
+      await saveAddressHistory(destination);
     } catch (error) {
       console.error('Failed to create route:', error);
       throw error;
     }
-  }, []);
+  }, [saveAddressHistory]);
 
   const addPassengerParcel = useCallback((pp: PassengerParcelInput) => {
     setPassengersParcels(prev => [...prev, pp]);
@@ -481,6 +506,125 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
     return routeOptimizationService.calculateDeviationChange(currentRoute, fromIndex, toIndex);
   };
 
+  // Встановлює previewRoute з ScheduledRide
+  const setPreviewRouteFromScheduledRide = useCallback(async (rides: ScheduledRide[], optimized: boolean) => {
+    try {
+      if (rides.length === 0) {
+        setPreviewRoute(null);
+        return;
+      }
+
+      // Конвертуємо ScheduledRide в PassengerParcelInput[]
+      const passengersParcels: PassengerParcelInput[] = rides.map(ride => ({
+        id: ride.id,
+        type: ride.type,
+        pickup: ride.pickup.address,
+        dropoff: ride.dropoff.address,
+      }));
+
+      // Визначаємо початкову та кінцеву адресу
+      const origin = rides[0]?.pickup.address || '';
+      const destination = rides[rides.length - 1]?.dropoff.address || '';
+
+      if (!origin || !destination) {
+        console.error('Scheduled rides missing origin or destination');
+        setPreviewRoute(null);
+        return;
+      }
+
+      let route: RouteStop[] = [];
+
+      if (optimized && passengersParcels.length > 0) {
+        // Використовуємо оптимізацію по точках
+        route = pointOptimizationService.optimizeRouteByPoints(
+          origin,
+          destination,
+          passengersParcels
+        );
+      } else if (passengersParcels.length > 0) {
+        // По черговості: origin → pickup1 → dropoff1 → pickup2 → dropoff2 → ... → destination
+        const allStops: Array<{ address: string; pp?: PassengerParcelInput }> = [
+          { address: origin }
+        ];
+        
+        passengersParcels.forEach(pp => {
+          allStops.push({ address: pp.pickup, pp });
+          allStops.push({ address: pp.dropoff, pp });
+        });
+        
+        allStops.push({ address: destination });
+
+        for (let i = 0; i < allStops.length - 1; i++) {
+          const current = allStops[i];
+          const next = allStops[i + 1];
+          const pp = current.pp || next.pp;
+          
+          route.push({
+            id: `preview-stop-${i}-${Date.now()}`,
+            type: pp?.type || 'passenger',
+            order: i,
+            pickup: { 
+              x: 0, 
+              y: 0, 
+              address: current.address,
+              lat: rides.find(r => r.pickup.address === current.address)?.pickup.lat,
+              lng: rides.find(r => r.pickup.address === current.address)?.pickup.lng,
+            },
+            dropoff: { 
+              x: 0, 
+              y: 0, 
+              address: next.address,
+              lat: rides.find(r => r.dropoff.address === next.address)?.dropoff.lat,
+              lng: rides.find(r => r.dropoff.address === next.address)?.dropoff.lng,
+            },
+            status: 'pending',
+            passenger: pp?.passenger ? {
+              id: pp.id,
+              name: pp.passenger.name,
+              phone: pp.passenger.phone || '',
+              rating: 5,
+            } : undefined,
+            parcel: pp?.parcel ? {
+              id: pp.id,
+              ...pp.parcel,
+            } : undefined,
+            price: pp?.price,
+          });
+        }
+      } else {
+        // Просто origin → destination
+        route = [{
+          id: `preview-stop-0-${Date.now()}`,
+          type: 'passenger',
+          order: 0,
+          pickup: { 
+            x: 0, 
+            y: 0, 
+            address: origin,
+            lat: rides[0]?.pickup.lat,
+            lng: rides[0]?.pickup.lng,
+          },
+          dropoff: { 
+            x: 0, 
+            y: 0, 
+            address: destination,
+            lat: rides[0]?.dropoff.lat,
+            lng: rides[0]?.dropoff.lng,
+          },
+          status: 'pending',
+        }];
+      }
+
+      // Перераховуємо ETA
+      const routeWithETA = routeOptimizationService.recalculateETA(route);
+      
+      setPreviewRoute(routeWithETA);
+    } catch (error) {
+      console.error('Failed to set preview route from scheduled rides:', error);
+      setPreviewRoute(null);
+    }
+  }, []);
+
   // Оновлює маршрут з точок (RoutePointDisplay[])
   const updateRouteFromPoints = useCallback(async (points: RoutePointDisplay[]) => {
     try {
@@ -498,6 +642,79 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
       throw error;
     }
   }, [currentRoute]);
+
+  // Завантажує історію адрес з AsyncStorage
+  const loadAddressHistory = useCallback(async () => {
+    try {
+      const history = await AsyncStorage.getItem(ADDRESS_HISTORY_KEY);
+      const favorites = await AsyncStorage.getItem(FAVORITE_ADDRESSES_KEY);
+      if (history) setAddressHistory(JSON.parse(history));
+      if (favorites) setFavoriteAddresses(JSON.parse(favorites));
+    } catch (error) {
+      console.error('Failed to load address history:', error);
+    }
+  }, []);
+
+  // Зберігає адресу в історію
+  const saveAddressHistory = useCallback(async (address: string) => {
+    if (!address.trim()) return;
+    
+    try {
+      // Видаляємо адресу з історії, якщо вона вже є (щоб перемістити на початок)
+      const filtered = addressHistory.filter(addr => addr !== address);
+      const updated = [address, ...filtered].slice(0, MAX_HISTORY);
+      setAddressHistory(updated);
+      await AsyncStorage.setItem(ADDRESS_HISTORY_KEY, JSON.stringify(updated));
+    } catch (error) {
+      console.error('Failed to save address history:', error);
+    }
+  }, [addressHistory]);
+
+  // Додає/видаляє адресу з улюблених
+  const toggleFavoriteAddress = useCallback(async (address: string) => {
+    try {
+      const isFavorite = favoriteAddresses.includes(address);
+      let updated: string[];
+      
+      if (isFavorite) {
+        updated = favoriteAddresses.filter(addr => addr !== address);
+      } else {
+        if (favoriteAddresses.length >= MAX_FAVORITES) {
+          // Видалити найстарішу улюблену
+          updated = [address, ...favoriteAddresses.slice(0, MAX_FAVORITES - 1)];
+        } else {
+          updated = [address, ...favoriteAddresses];
+        }
+      }
+      
+      setFavoriteAddresses(updated);
+      await AsyncStorage.setItem(FAVORITE_ADDRESSES_KEY, JSON.stringify(updated));
+    } catch (error) {
+      console.error('Failed to toggle favorite address:', error);
+    }
+  }, [favoriteAddresses]);
+
+  // Очищає історію адрес
+  const clearAddressHistory = useCallback(async () => {
+    try {
+      setAddressHistory([]);
+      await AsyncStorage.removeItem(ADDRESS_HISTORY_KEY);
+    } catch (error) {
+      console.error('Failed to clear address history:', error);
+    }
+  }, []);
+
+  // Реєструє callback для центрування карти
+  const setMapCenterCallback = useCallback((callback: ((lat: number, lng: number) => void) | null) => {
+    setMapCenterCallbackState(() => callback);
+  }, []);
+
+  // Центрує карту на вказаній локації
+  const centerMapOnUserLocation = useCallback((lat: number, lng: number) => {
+    if (mapCenterCallback) {
+      mapCenterCallback(lat, lng);
+    }
+  }, [mapCenterCallback]);
 
   const value: DriverContextType = {
     isOnline,
@@ -537,6 +754,15 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
     clearPreview,
     calculateRouteDeviation,
     updateRouteFromPoints,
+    setPreviewRouteFromScheduledRide,
+    addressHistory,
+    favoriteAddresses,
+    loadAddressHistory,
+    saveAddressHistory,
+    toggleFavoriteAddress,
+    clearAddressHistory,
+    setMapCenterCallback,
+    centerMapOnUserLocation,
   };
 
   return <DriverContext.Provider value={value}>{children}</DriverContext.Provider>;

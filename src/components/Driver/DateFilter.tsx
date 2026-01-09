@@ -1,6 +1,6 @@
 /**
  * DateFilter
- * React Native version - Date filter component for map
+ * React Native version - Compact pill-style date filter component
  */
 
 import React from 'react';
@@ -10,13 +10,15 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useDriver } from '../../contexts/DriverContext';
 import { getDateString } from '../../services/mock/mockData';
-import { COLORS, TYPOGRAPHY, SHADOWS, createShadow } from '../../styles/designTokens';
+import { COLORS, TYPOGRAPHY, SHADOWS } from '../../styles/designTokens';
 
 const DateFilter: React.FC = () => {
   const { selectedDate, setSelectedDate } = useDriver();
+  const insets = useSafeAreaInsets();
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -52,31 +54,44 @@ const DateFilter: React.FC = () => {
     setSelectedDate(getDateString(0));
   };
 
+  const handlePress = (event: any) => {
+    const { locationX, target } = event.nativeEvent;
+    const containerWidth = target?.offsetWidth || 0;
+    
+    if (containerWidth === 0) {
+      // Fallback: tap center goes to today
+      goToToday();
+      return;
+    }
+
+    const tapPosition = locationX / containerWidth;
+    
+    if (tapPosition < 0.33) {
+      // Left third - previous day
+      goToPreviousDay();
+    } else if (tapPosition > 0.67) {
+      // Right third - next day
+      goToNextDay();
+    } else {
+      // Center third - go to today
+      goToToday();
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View 
+      style={[
+        styles.container,
+        { top: insets.top + 8 } // 8px below Dynamic Island
+      ]}
+    >
       <TouchableOpacity
-        style={styles.button}
-        onPress={goToPreviousDay}
-        activeOpacity={0.95}
+        style={styles.pill}
+        onPress={handlePress}
+        activeOpacity={0.8}
       >
-        <Icon name="chevron-left" size={18} color="#94a3b8" />
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.todayButton}
-        onPress={goToToday}
-        activeOpacity={0.95}
-      >
-        <Icon name="calendar" size={16} color="#3b82f6" />
-        <Text style={styles.todayButtonText}>{formatDate(selectedDate)}</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={goToNextDay}
-        activeOpacity={0.95}
-      >
-        <Icon name="chevron-right" size={18} color="#94a3b8" />
+        <Icon name="calendar" size={14} color={COLORS.blue[600]} />
+        <Text style={styles.dateText}>{formatDate(selectedDate)}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -85,43 +100,32 @@ const DateFilter: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 80, // top-20 = 80px
-    left: '50%',
-    transform: [{ translateX: -150 }], // -translate-x-1/2 (приблизно)
-    flexDirection: 'row',
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)', // bg-white/95
-    // backdrop-blur-md можна зробити через BlurView з expo-blur
-    borderRadius: 24, // rounded-2xl (Linear/Vercel style)
-    padding: 6, // p-1.5
-    gap: 8, // gap-2
-    borderWidth: 1,
-    borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
-    ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
     zIndex: 80,
   },
-  button: {
-    padding: 10, // p-2.5
-    borderRadius: 12, // rounded-xl (Linear/Vercel style)
-    minHeight: 44, // Touch target (Linear/Vercel style)
-  },
-  todayButton: {
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10, // Compact padding (~17% reduction)
-    paddingHorizontal: 20, // px-5
-    minHeight: 40, // Compact touch target (~9% reduction, if applicable)
-    backgroundColor: COLORS.blue[600], // bg-blue-600
-    borderRadius: 12, // rounded-xl (Linear/Vercel style)
-    gap: 8, // gap-2
-    ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
+    justifyContent: 'center',
+    height: 28, // Very compact height
+    paddingHorizontal: 12, // Horizontal padding
+    paddingVertical: 6, // Vertical padding
+    backgroundColor: 'rgba(255, 255, 255, 0.95)', // White with slight transparency
+    borderRadius: 14, // Pill shape (half of height)
+    borderWidth: 1,
+    borderColor: COLORS.slate[200],
+    gap: 6, // Gap between icon and text
+    ...SHADOWS.sm,
+    minWidth: 100, // Minimum width for tap zones
   },
-  todayButtonText: {
-    fontSize: 12, // text-[12px]
-    fontWeight: '600', // font-semibold
-    color: '#ffffff',
+  dateText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.slate[900],
     textTransform: 'uppercase',
-    letterSpacing: TYPOGRAPHY.tracking02(12), // tracking-[0.2em] = 2.4px
+    letterSpacing: TYPOGRAPHY.tracking02(11),
   },
 });
 
