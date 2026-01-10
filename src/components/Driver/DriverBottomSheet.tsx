@@ -27,7 +27,7 @@ import Geolocation from '@react-native-community/geolocation';
 import { mapService } from '../../services/maps/mapService';
 import BottomSheet, { BottomSheetView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { MapPin, Target, Star } from 'lucide-react-native';
+import { MapPin, Target, Star, UserPlus, Package, Plus } from 'lucide-react-native';
 import { useDriver } from '../../contexts/DriverContext';
 import { PassengerParcelInput } from '../../types/driver.types';
 import RouteStack from './RouteStack';
@@ -78,6 +78,8 @@ const DriverBottomSheet: React.FC = () => {
   });
 
   const bottomSheetRef = useRef<BottomSheet>(null);
+  const swipeScrollViewRef = useRef<ScrollView>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
   // Компонент історії адрес
   const AddressHistory: React.FC<{
@@ -355,58 +357,81 @@ const DriverBottomSheet: React.FC = () => {
     }
   };
 
+  // Обробка свайпу для синхронізації activeTab
+  const handleScroll = useCallback((event: any) => {
+    if (containerWidth === 0) return;
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const pageIndex = Math.round(offsetX / containerWidth);
+    const newTab = pageIndex === 0 ? 'route' : 'stats';
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+    }
+  }, [containerWidth, activeTab]);
+
+  // Синхронізація скролу при програмній зміні табу (на випадок, якщо потрібно)
+  React.useEffect(() => {
+    if (swipeScrollViewRef.current && containerWidth > 0) {
+      const pageIndex = activeTab === 'route' ? 0 : 1;
+      swipeScrollViewRef.current.scrollTo({
+        x: pageIndex * containerWidth,
+        animated: true,
+      });
+    }
+  }, [activeTab, containerWidth]);
+
   const renderContent = () => {
     if (showRoute) {
       return (
-        <View style={styles.content}>
-          {/* Tabs */}
-          <View style={styles.tabs}>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'route' && styles.tabActive]}
-              onPress={() => setActiveTab('route')}
+        <View 
+          style={styles.content}
+          onLayout={(event) => {
+            const { width } = event.nativeEvent.layout;
+            if (width > 0) {
+              setContainerWidth(width);
+            }
+          }}
+        >
+          {/* Swipeable Content - замість кнопок табів */}
+          {containerWidth > 0 && (
+            <ScrollView
+              ref={swipeScrollViewRef}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={handleScroll}
+              scrollEventThrottle={16}
+              style={styles.swipeableContainer}
+              contentContainerStyle={styles.swipeableContent}
             >
-              <Icon name="map-marker-path" size={16} color={activeTab === 'route' ? '#0f172a' : '#94a3b8'} />
-              <Text style={[styles.tabText, activeTab === 'route' && styles.tabTextActive]}>
-                Маршрут
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'stats' && styles.tabActive]}
-              onPress={() => setActiveTab('stats')}
-            >
-              <Icon name="chart-bar" size={16} color={activeTab === 'stats' ? '#0f172a' : '#94a3b8'} />
-              <Text style={[styles.tabText, activeTab === 'stats' && styles.tabTextActive]}>
-                Статистика
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {activeTab === 'route' ? (
-            <View style={styles.routeContent}>
-              <View style={styles.routeHeader}>
-                <Text style={styles.routeTitle}>Поточний маршрут</Text>
-                {routeStats && (
-                  <Text style={styles.routeCount}>{routeStats.totalDistance} км</Text>
-                )}
+              {/* Сторінка 1: МАРШРУТ */}
+              <View style={[styles.swipeablePage, { width: containerWidth }]}>
+                <View style={styles.routeContent}>
+                  <View style={styles.routeHeader}>
+                    <Text style={styles.routeTitle}>Поточний маршрут</Text>
+                    <TouchableOpacity
+                      style={styles.addPassengerParcelButton}
+                      onPress={handleAddPassengerParcelClick}
+                    >
+                      <UserPlus size={16} color={COLORS.slate[900]} strokeWidth={2} />
+                      <Text style={styles.addPassengerParcelSlash}>/</Text>
+                      <Plus size={12} color={COLORS.slate[900]} strokeWidth={2.5} />
+                      <View style={styles.packageWrapper}>
+                        <Package size={16} color={COLORS.slate[900]} strokeWidth={2} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                  <RouteStack />
+                </View>
               </View>
-              <RouteStack />
 
-              {/* Add Passenger/Parcel Section */}
-              <View style={styles.addPassengerParcelSection}>
-                <TouchableOpacity
-                  style={styles.addPassengerParcelButton}
-                  onPress={handleAddPassengerParcelClick}
-                >
-                  <Icon name="account-plus" size={18} color={COLORS.blue[600]} />
-                  <Text style={styles.addPassengerParcelButtonText}>Додати пасажира / посилку</Text>
-                </TouchableOpacity>
+              {/* Сторінка 2: СТАТИСТИКА */}
+              <View style={[styles.swipeablePage, { width: containerWidth }]}>
+                <View style={styles.statsContent}>
+                  <Text style={styles.statsTitle}>Статистика поточного маршруту</Text>
+                  <LiveRouteStats />
+                </View>
               </View>
-            </View>
-          ) : (
-            <View style={styles.statsContent}>
-              <Text style={styles.statsTitle}>Статистика поточного маршруту</Text>
-              <LiveRouteStats />
-            </View>
+            </ScrollView>
           )}
         </View>
       );
@@ -615,25 +640,31 @@ const DriverBottomSheet: React.FC = () => {
               {/* Pickup */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalLabel}>Забрати</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={newPassengerParcel.pickup}
-                  onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, pickup: text })}
-                  placeholder="Адреса забрання"
-                  placeholderTextColor="#cbd5e1"
-                />
+                <View style={styles.modalInputContainer}>
+                  <MapPin size={16} color={COLORS.blue[600]} strokeWidth={2} />
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newPassengerParcel.pickup}
+                    onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, pickup: text })}
+                    placeholder="Адреса забрання"
+                    placeholderTextColor="#cbd5e1"
+                  />
+                </View>
               </View>
 
               {/* Dropoff */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalLabel}>Привезти</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={newPassengerParcel.dropoff}
-                  onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, dropoff: text })}
-                  placeholder="Адреса доставки"
-                  placeholderTextColor="#cbd5e1"
-                />
+                <View style={styles.modalInputContainer}>
+                  <Target size={16} color={COLORS.blue[600]} strokeWidth={2} />
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newPassengerParcel.dropoff}
+                    onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, dropoff: text })}
+                    placeholder="Адреса доставки"
+                    placeholderTextColor="#cbd5e1"
+                  />
+                </View>
               </View>
 
               {/* Passenger fields */}
@@ -641,24 +672,28 @@ const DriverBottomSheet: React.FC = () => {
                 <>
                   <View style={styles.modalSection}>
                     <Text style={styles.modalLabel}>Ім'я (опціонально)</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={newPassengerParcel.name || ''}
-                      onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, name: text })}
-                      placeholder="Ім'я пасажира"
-                      placeholderTextColor="#cbd5e1"
-                    />
+                    <View style={styles.modalInputContainer}>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={newPassengerParcel.name || ''}
+                        onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, name: text })}
+                        placeholder="Ім'я пасажира"
+                        placeholderTextColor="#cbd5e1"
+                      />
+                    </View>
                   </View>
                   <View style={styles.modalSection}>
                     <Text style={styles.modalLabel}>Телефон (опціонально)</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={newPassengerParcel.phone || ''}
-                      onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, phone: text })}
-                      placeholder="Телефон"
-                      placeholderTextColor="#cbd5e1"
-                      keyboardType="phone-pad"
-                    />
+                    <View style={styles.modalInputContainer}>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={newPassengerParcel.phone || ''}
+                        onChangeText={(text) => setNewPassengerParcel({ ...newPassengerParcel, phone: text })}
+                        placeholder="Телефон"
+                        placeholderTextColor="#cbd5e1"
+                        keyboardType="phone-pad"
+                      />
+                    </View>
                   </View>
                 </>
               )}
@@ -692,19 +727,21 @@ const DriverBottomSheet: React.FC = () => {
                   </View>
                   <View style={styles.modalSection}>
                     <Text style={styles.modalLabel}>Вага (кг)</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={newPassengerParcel.weight?.toString() || ''}
-                      onChangeText={(text) =>
-                        setNewPassengerParcel({
-                          ...newPassengerParcel,
-                          weight: text ? parseFloat(text) : undefined,
-                        })
-                      }
-                      placeholder="Вага"
-                      placeholderTextColor="#cbd5e1"
-                      keyboardType="numeric"
-                    />
+                    <View style={styles.modalInputContainer}>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={newPassengerParcel.weight?.toString() || ''}
+                        onChangeText={(text) =>
+                          setNewPassengerParcel({
+                            ...newPassengerParcel,
+                            weight: text ? parseFloat(text) : undefined,
+                          })
+                        }
+                        placeholder="Вага"
+                        placeholderTextColor="#cbd5e1"
+                        keyboardType="numeric"
+                      />
+                    </View>
                   </View>
                 </>
               )}
@@ -807,41 +844,15 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  // Tabs - точні стилі з веб-версії: bg-slate-50 p-1.5 rounded-[24px] border-slate-100
-  tabs: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.slate[50], // bg-slate-50
-    padding: 6, // p-1.5
-    borderRadius: 24, // rounded-[24px]
-    borderWidth: 1,
-    borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
-    marginBottom: 14, // Compact spacing (~42% reduction)
-    gap: 8, // gap-2
-  },
-  tab: {
+  // Swipeable Container - замість кнопок табів
+  swipeableContainer: {
     flex: 1,
+  },
+  swipeableContent: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6.4, // Reduced by 20% (8 * 0.8)
-    paddingHorizontal: 16, // px-4
-    borderRadius: 16, // rounded-2xl
-    gap: 8, // gap-2
   },
-  tabActive: {
-    backgroundColor: '#ffffff', // bg-white
-    ...SHADOWS.sm, // shadow-sm (Linear/Vercel style - subtle)
-  },
-  tabText: {
-    fontSize: 11, // text-[11px]
-    fontWeight: '600', // font-semibold (Linear/Vercel style, not font-black)
-    color: COLORS.slate[500], // text-slate-500 (secondary text)
-    textTransform: 'uppercase',
-    letterSpacing: TYPOGRAPHY.trackingWidest(11), // tracking-widest = 1.1px
-  },
-  tabTextActive: {
-    color: COLORS.slate[900], // text-slate-900 (main text)
-    fontWeight: '600', // font-semibold
+  swipeablePage: {
+    paddingHorizontal: 0, // Без padding для розтягування плиток до країв
   },
   // Route Content
   routeContent: {
@@ -877,18 +888,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: COLORS.blue[50],
-    borderRadius: 16,
+    width: 72, // Збільшено для + перед коробкою
+    height: 36,
+    backgroundColor: 'transparent', // Прозорий фон
+    borderRadius: 8, // Невеликий radius
     borderWidth: 1,
-    borderColor: COLORS.blue[200],
-    gap: 8,
+    borderColor: COLORS.slate[900], // Чорна рамка
+    gap: 3, // Мінімальний відступ між іконками
+    paddingHorizontal: 8,
   },
-  addPassengerParcelButtonText: {
+  addPassengerParcelSlash: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.blue[600],
+    color: COLORS.slate[900], // Чорний колір для слешу
+    marginHorizontal: 2,
+  },
+  packageWrapper: {
+    marginLeft: -4, // Зсув коробки на 4px вліво
   },
   // Stats Content
   statsContent: {
@@ -1148,107 +1164,138 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
+    padding: 16, // Компактний padding
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomColor: COLORS.slate[200], // border-slate-200
   },
   modalTitle: {
-    fontSize: 11,
+    fontSize: 11, // Як routeTitle
     fontWeight: '600', // font-semibold
     color: COLORS.slate[500], // text-slate-500 (secondary text)
     textTransform: 'uppercase',
-    letterSpacing: 2.5,
+    letterSpacing: TYPOGRAPHY.tracking025(11), // tracking-[0.25em] = 2.75px
   },
   modalClose: {
     padding: 8,
   },
   modalBody: {
-    padding: 24,
+    padding: 16, // Компактний padding
   },
   modalSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Компактний відступ
   },
   modalLabel: {
-    fontSize: 10,
+    fontSize: 11, // Як routeTitle
     fontWeight: '600', // font-semibold
     color: COLORS.slate[500], // text-slate-500 (secondary text)
     textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12, // More whitespace
+    letterSpacing: TYPOGRAPHY.tracking025(11), // tracking-[0.25em] = 2.75px
+    marginBottom: 8, // Компактний відступ
+  },
+  modalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10, // Як addressInput
+    paddingHorizontal: 12, // Як addressInput
+    minHeight: 44, // Як addressInput
+    maxHeight: 44, // Як addressInput
+    backgroundColor: COLORS.slate[50], // bg-slate-50
+    borderRadius: 24, // Як addressInput
+    borderWidth: 1,
+    borderColor: COLORS.slate[200], // border-slate-200
+    gap: 12, // Як addressInput
+    ...SHADOWS.sm, // shadow-sm for depth
   },
   modalInput: {
-    padding: 16,
-    backgroundColor: COLORS.slate[50], // bg-slate-50
-    borderRadius: 12, // rounded-xl
-    borderWidth: 1,
-    borderColor: COLORS.slate[200], // border-slate-200 (Linear/Vercel style)
-    fontSize: 16,
-    fontWeight: '500', // font-medium (Linear/Vercel style for UI text)
-    color: COLORS.slate[900], // text-slate-900 (main text)
-    ...SHADOWS.sm, // shadow-sm for depth
+    flex: 1,
+    fontSize: 15, // Як addressTextInput
+    fontWeight: '500', // font-medium
+    color: COLORS.slate[900], // text-slate-900
+    paddingVertical: 0, // Remove vertical padding for compactness
+    height: 24, // Fixed height for text input
   },
   modalTypeButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 8, // Компактний gap
   },
   modalTypeButton: {
     flex: 1,
-    paddingVertical: 12,
+    height: 36, // Компактна висота
+    paddingVertical: 8, // Компактний padding
     paddingHorizontal: 16,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 12,
+    backgroundColor: COLORS.slate[50], // bg-slate-50
+    borderRadius: 12, // rounded-xl
     alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.slate[200], // border-slate-200
   },
   modalTypeButtonActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: COLORS.blue[600], // bg-blue-600
+    borderColor: COLORS.blue[600],
   },
   modalTypeButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#475569',
+    fontSize: 12, // Компактний розмір
+    fontWeight: '600', // font-semibold
+    color: COLORS.slate[700], // text-slate-700
+    textTransform: 'uppercase',
+    letterSpacing: TYPOGRAPHY.tracking02(12),
   },
   modalTypeButtonTextActive: {
-    color: '#ffffff',
+    color: '#ffffff', // text-white
   },
   modalSizeButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 8, // Компактний gap
   },
   modalSizeButton: {
     flex: 1,
-    paddingVertical: 12,
+    height: 36, // Компактна висота (як modalTypeButton)
+    paddingVertical: 8, // Компактний padding
     paddingHorizontal: 8,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 12,
+    backgroundColor: COLORS.slate[50], // bg-slate-50
+    borderRadius: 12, // rounded-xl
     alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.slate[200], // border-slate-200
   },
   modalSizeButtonActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: COLORS.blue[600], // bg-blue-600
+    borderColor: COLORS.blue[600],
   },
   modalSizeButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#475569',
+    fontSize: 12, // Компактний розмір
+    fontWeight: '600', // font-semibold
+    color: COLORS.slate[700], // text-slate-700
+    textTransform: 'uppercase',
+    letterSpacing: TYPOGRAPHY.tracking02(12),
   },
   modalSizeButtonTextActive: {
-    color: '#ffffff',
+    color: '#ffffff', // text-white
   },
   modalSaveButton: {
-    paddingVertical: 16,
-    backgroundColor: '#2563eb',
-    borderRadius: 28,
+    height: 36, // Компактна висота (як addPassengerParcelButton)
+    paddingVertical: 8, // Компактний padding
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.blue[600], // bg-blue-600
+    borderRadius: 8, // Компактний radius
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 8,
+    borderWidth: 1,
+    borderColor: COLORS.blue[600],
   },
   modalSaveButtonDisabled: {
-    backgroundColor: '#cbd5e1',
+    backgroundColor: COLORS.slate[300], // bg-slate-300
+    borderColor: COLORS.slate[300],
   },
   modalSaveButtonText: {
-    fontSize: 12,
+    fontSize: 12, // Компактний розмір
     fontWeight: '600', // font-semibold
-    color: '#ffffff',
+    color: '#ffffff', // text-white
     textTransform: 'uppercase',
-    letterSpacing: 2.5,
+    letterSpacing: TYPOGRAPHY.tracking02(12), // tracking-[0.2em] = 2.4px
   },
   // Route Options
   routeOptionButton: {
