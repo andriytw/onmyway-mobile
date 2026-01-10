@@ -248,27 +248,39 @@ export const DriverProvider: React.FC<DriverProviderProps> = ({ children }) => {
           passengersParcels
         );
       } else if (passengersParcels.length > 0) {
-        // По черговості: origin → pickup1 → dropoff1 → pickup2 → dropoff2 → ... → destination
+        // Правильна логіка: origin ЗАВЖДИ перша, destination ЗАВЖДИ остання
+        // Проміжні точки (pickup/dropoff) додаються між ними, навіть якщо збігаються
+        // origin → pickup1 → dropoff1 → pickup2 → dropoff2 → ... → destination
+        
         const allStops: Array<{ address: string; pp?: PassengerParcelInput }> = [
-          { address: origin }
+          { address: origin } // Стартова точка - ЗАВЖДИ перша
         ];
         
+        // Додаємо всі pickup/dropoff пасажирів/посилок (проміжні точки)
         passengersParcels.forEach(pp => {
           allStops.push({ address: pp.pickup, pp });
           allStops.push({ address: pp.dropoff, pp });
         });
         
-        allStops.push({ address: destination });
+        allStops.push({ address: destination }); // Фінішна точка - ЗАВЖДИ остання
 
+        // Створюємо RouteStop тільки для переходів між різними адресами
+        // Пропускаємо переходи, де pickup === dropoff (однакова адреса)
         for (let i = 0; i < allStops.length - 1; i++) {
           const current = allStops[i];
           const next = allStops[i + 1];
+          
+          // Пропускаємо, якщо адреси однакові (немає сенсу створювати RouteStop для Львів → Львів)
+          if (current.address.trim().toLowerCase() === next.address.trim().toLowerCase()) {
+            continue;
+          }
+          
           const pp = current.pp || next.pp;
           
           route.push({
-            id: `stop-${i}-${Date.now()}`,
+            id: `stop-${route.length}-${Date.now()}`,
             type: pp?.type || 'passenger',
-            order: i,
+            order: route.length,
             pickup: { x: 0, y: 0, address: current.address },
             dropoff: { x: 0, y: 0, address: next.address },
             status: 'pending',

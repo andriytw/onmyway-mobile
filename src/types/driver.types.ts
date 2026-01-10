@@ -212,8 +212,8 @@ export interface RoutePoint {
 export interface RoutePointDisplay {
   id: string; // "pickup-{stopId}" або "dropoff-{stopId}"
   address: string;
-  action: 'pickup_passenger' | 'dropoff_passenger' | 'pickup_parcel' | 'dropoff_parcel';
-  actionLabel: string; // "Забрати пасажира", "Висадити пасажира" тощо
+  action: 'start' | 'finish' | 'pickup_passenger' | 'dropoff_passenger' | 'pickup_parcel' | 'dropoff_parcel';
+  actionLabel: string; // "Старт маршруту", "Фініш маршруту", "Забрати пасажира", "Висадити пасажира" тощо
   stopId: string; // ID оригінального RouteStop
   order: number; // порядок в маршруті (0, 1, 2, 3...)
   passenger?: {

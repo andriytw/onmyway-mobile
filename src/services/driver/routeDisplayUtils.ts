@@ -39,12 +39,16 @@ export function convertRouteStopsToPoints(route: RouteStop[]): RoutePointDisplay
       cumulativeTime += (distanceToPickup * 0.1 / AVERAGE_SPEED_KMH) * 60; // хвилини
     }
 
-    // Pickup точка
+    // Визначаємо чи це перша точка (старт) або остання точка (фініш)
+    const isFirstStop = index === 0;
+    const isLastStop = index === route.length - 1;
+
+    // Pickup точка - якщо це перший stop, то це старт маршруту
     const pickupPoint: RoutePointDisplay = {
       id: `pickup-${stop.id}`,
       address: stop.pickup.address,
-      action: stop.type === 'passenger' ? 'pickup_passenger' : 'pickup_parcel',
-      actionLabel: stop.type === 'passenger' ? 'Забрати пасажира' : 'Забрати посилку',
+      action: isFirstStop ? 'start' : (stop.type === 'passenger' ? 'pickup_passenger' : 'pickup_parcel'),
+      actionLabel: isFirstStop ? 'Старт маршруту' : (stop.type === 'passenger' ? 'Забрати пасажира' : 'Забрати посилку'),
       stopId: stop.id,
       order: index * 2,
       passenger: stop.passenger,
@@ -59,20 +63,22 @@ export function convertRouteStopsToPoints(route: RouteStop[]): RoutePointDisplay
     };
     points.push(pickupPoint);
 
-    // Час на pickup операцію
-    cumulativeTime += PICKUP_TIME_MINUTES;
+    // Час на pickup операцію (для старту не додаємо час)
+    if (!isFirstStop) {
+      cumulativeTime += PICKUP_TIME_MINUTES;
+    }
 
     // Відстань від pickup до dropoff
     const distancePickupToDropoff = calculateDistance(stop.pickup, stop.dropoff);
     cumulativeDistance += distancePickupToDropoff * 0.1; // конвертуємо в км
     cumulativeTime += (distancePickupToDropoff * 0.1 / AVERAGE_SPEED_KMH) * 60; // хвилини
 
-    // Dropoff точка
+    // Dropoff точка - якщо це останній stop, то це фініш маршруту
     const dropoffPoint: RoutePointDisplay = {
       id: `dropoff-${stop.id}`,
       address: stop.dropoff.address,
-      action: stop.type === 'passenger' ? 'dropoff_passenger' : 'dropoff_parcel',
-      actionLabel: stop.type === 'passenger' ? 'Висадити пасажира' : 'Віддати посилку',
+      action: isLastStop ? 'finish' : (stop.type === 'passenger' ? 'dropoff_passenger' : 'dropoff_parcel'),
+      actionLabel: isLastStop ? 'Фініш маршруту' : (stop.type === 'passenger' ? 'Висадити пасажира' : 'Віддати посилку'),
       stopId: stop.id,
       order: index * 2 + 1,
       passenger: stop.passenger,
@@ -85,8 +91,10 @@ export function convertRouteStopsToPoints(route: RouteStop[]): RoutePointDisplay
     };
     points.push(dropoffPoint);
 
-    // Час на dropoff операцію
-    cumulativeTime += DROPOFF_TIME_MINUTES;
+    // Час на dropoff операцію (для фінішу не додаємо час)
+    if (!isLastStop) {
+      cumulativeTime += DROPOFF_TIME_MINUTES;
+    }
   });
 
   return points;

@@ -18,6 +18,7 @@ import {
   Swipeable,
 } from 'react-native-gesture-handler';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { Package, Plus, Minus } from 'lucide-react-native';
 import { RoutePointDisplay } from '../../types/driver.types';
 import { COLORS, TYPOGRAPHY, SHADOWS } from '../../styles/designTokens';
 import { useDriver } from '../../contexts/DriverContext';
@@ -48,59 +49,45 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
   // Refs для swipe-to-delete
   const swipeableRef = useRef<Swipeable>(null);
 
-  // Оновити логіку іконок з урахуванням першої/останньої точки
+  // Логіка іконок: всі чорні з чорними рамками без заливки фону
   const getActionIcon = () => {
-    const isFirst = index === 0;
-    const isLast = index === totalItems - 1;
+    const blackColor = COLORS.slate[900]; // Чорний колір для всіх іконок
     
-    // Старт маршруту (перша точка, pickup)
-    if (isFirst && point.action.includes('pickup')) {
-      return { name: 'map-pin', color: COLORS.blue[600] };
+    // Старт маршруту
+    if (point.action === 'start') {
+      return { type: 'material', name: 'map-marker', color: blackColor, size: 28 };
     }
     
-    // Фініш маршруту (остання точка, dropoff)
-    if (isLast && point.action.includes('dropoff')) {
-      return { name: 'flag', color: COLORS.green[600] };
+    // Фініш маршруту
+    if (point.action === 'finish') {
+      return { type: 'material', name: 'map-marker-check', color: blackColor, size: 28 };
     }
     
     // Забрати пасажира
     if (point.action === 'pickup_passenger') {
-      return { name: 'account-plus', color: COLORS.blue[600] };
+      return { type: 'material', name: 'account-plus-outline', color: blackColor, size: 24 };
     }
     
-    // Віддати пасажира
+    // Висадити пасажира
     if (point.action === 'dropoff_passenger') {
-      return { name: 'account-minus', color: COLORS.green[600] };
+      return { type: 'material', name: 'account-minus-outline', color: blackColor, size: 24 };
     }
     
-    // Забрати посилку
+    // Забрати посилку - комбінована іконка Package + Plus
     if (point.action === 'pickup_parcel') {
-      return { name: 'package-variant', color: COLORS.amber[600] };
+      return { type: 'combined', base: 'package', overlay: 'plus', color: blackColor, size: 24 };
     }
     
-    // Віддати посилку
+    // Віддати посилку - комбінована іконка Package + Minus
     if (point.action === 'dropoff_parcel') {
-      return { name: 'package-check', color: COLORS.green[600] };
+      return { type: 'combined', base: 'package', overlay: 'minus', color: blackColor, size: 24 };
     }
     
-    return { name: 'map-marker', color: COLORS.slate[500] };
+    return { type: 'material', name: 'map-marker', color: blackColor, size: 24 };
   };
 
-  const getActionColor = () => {
-    switch (point.action) {
-      case 'pickup_passenger':
-      case 'dropoff_passenger':
-        return { bg: COLORS.blue[100], border: COLORS.blue[200] };
-      case 'pickup_parcel':
-      case 'dropoff_parcel':
-        return { bg: COLORS.green[100], border: COLORS.green[200] };
-      default:
-        return { bg: COLORS.slate[50], border: COLORS.slate[200] };
-    }
-  };
 
   const icon = getActionIcon();
-  const colors = getActionColor();
 
   // Обробник видалення
   const handleDelete = () => {
@@ -185,9 +172,24 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
             </TouchableOpacity>
           )}
 
-          {/* Іконка зліва */}
-          <View style={[styles.iconContainer, { backgroundColor: colors.bg, borderColor: colors.border }]}>
-            <Icon name={icon.name} size={24} color={icon.color} />
+          {/* Іконка зліва - чорна з чорною рамкою, без заливки фону */}
+          <View style={styles.iconContainer}>
+            {icon.type === 'combined' ? (
+              // Комбінована іконка для посилок (Plus/Minus + Package)
+              <View style={styles.combinedIcon}>
+                {icon.overlay === 'plus' ? (
+                  <Plus size={14} color={icon.color} strokeWidth={2.5} />
+                ) : (
+                  <Minus size={14} color={icon.color} strokeWidth={2.5} />
+                )}
+                <View style={styles.packageIcon}>
+                  <Package size={24} color={icon.color} strokeWidth={2} />
+                </View>
+              </View>
+            ) : (
+              // MaterialCommunityIcons для інших типів
+              <Icon name={icon.name} size={icon.size} color={icon.color} />
+            )}
           </View>
 
           {/* Адреса по центру */}
@@ -222,9 +224,9 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
           >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {index === 0 && point.action.includes('pickup')
+                {point.action === 'start'
                   ? 'Старт маршруту'
-                  : index === totalItems - 1 && point.action.includes('dropoff')
+                  : point.action === 'finish'
                   ? 'Фініш маршруту'
                   : point.action === 'pickup_passenger'
                   ? 'Забрати пасажира'
@@ -251,8 +253,8 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
                 <Text style={styles.modalValue}>{point.address}</Text>
               </View>
 
-              {/* Для пасажира */}
-              {point.passenger && (
+              {/* Для пасажира (тільки якщо не старт/фініш) */}
+              {point.passenger && point.action !== 'start' && point.action !== 'finish' && (
                 <>
                   <View style={styles.modalSection}>
                     <Text style={styles.modalLabel}>Ім'я</Text>
@@ -276,12 +278,12 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
                 </>
               )}
 
-              {/* Для посилки - потрібно визначити відправника/отримувача */}
-              {point.parcel && (
+              {/* Для посилки (тільки якщо не старт/фініш) */}
+              {point.parcel && point.action !== 'start' && point.action !== 'finish' && (
                 <>
                   <View style={styles.modalSection}>
                     <Text style={styles.modalLabel}>
-                      {point.action.includes('pickup') ? 'Відправник' : 'Отримувач'}
+                      {(point.action === 'pickup_parcel' || point.action === 'start') ? 'Відправник' : 'Отримувач'}
                     </Text>
                     {/* TODO: Додати дані відправника/отримувача до RouteStop.parcel або RoutePointDisplay */}
                     <Text style={styles.modalValue}>Дані відсутні</Text>
@@ -311,8 +313,8 @@ const RouteStackItem: React.FC<RouteStackItemProps> = ({
                 </View>
               </View>
 
-              {/* Кнопки чату та подзвонити */}
-              {(point.passenger || point.parcel) && (
+              {/* Кнопки чату та подзвонити (тільки якщо не старт/фініш) */}
+              {(point.passenger || point.parcel) && point.action !== 'start' && point.action !== 'finish' && (
                 <View style={styles.modalActions}>
                   <TouchableOpacity
                     style={styles.modalActionButton}
@@ -374,9 +376,20 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 12,
     borderWidth: 1,
+    borderColor: COLORS.slate[900], // Чорна рамка
+    backgroundColor: 'transparent', // Прозорий фон
     justifyContent: 'center',
     alignItems: 'center',
     flexShrink: 0,
+  },
+  combinedIcon: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  packageIcon: {
+    marginLeft: -2, // Коробка зсунута на 3px вліво від попереднього положення (1px - 3px = -2px)
   },
   textContainer: {
     flex: 1,
